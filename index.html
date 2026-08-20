@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MacPocket — AI voice note-taker for macOS</title>
+<meta name="description" content="MacPocket records meetings from your Mac's microphone or system audio, transcribes them locally with Whisper, and generates summaries and action items — a local-first, open-source clone of the Pocket AI hardware device.">
+<style>
+  :root {
+    --bg: #f7f6f3;
+    --bg-elevated: #ffffff;
+    --text: #1c1b19;
+    --text-muted: #6b6660;
+    --border: #e5e2dc;
+    --accent: #b45309;
+    --accent-soft: #fdf1e2;
+    --code-bg: #1c1b19;
+    --code-text: #f4f1ea;
+    --shadow: 0 1px 2px rgba(28,27,25,0.04), 0 8px 24px rgba(28,27,25,0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15140f;
+      --bg-elevated: #1d1b16;
+      --text: #f2efe9;
+      --text-muted: #a39d90;
+      --border: #322f27;
+      --accent: #e08a3c;
+      --accent-soft: #2a2116;
+      --code-bg: #0e0d0a;
+      --code-text: #f2efe9;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15140f;
+    --bg-elevated: #1d1b16;
+    --text: #f2efe9;
+    --text-muted: #a39d90;
+    --border: #322f27;
+    --accent: #e08a3c;
+    --accent-soft: #2a2116;
+    --code-bg: #0e0d0a;
+    --code-text: #f2efe9;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); }
+
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+
+  header.hero {
+    padding: 88px 0 56px;
+    border-bottom: 1px solid var(--border);
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 6px 12px;
+    border-radius: 999px;
+    margin-bottom: 20px;
+  }
+  h1 {
+    font-size: clamp(2rem, 4.5vw, 3rem);
+    line-height: 1.12;
+    margin: 0 0 16px;
+    letter-spacing: -0.02em;
+  }
+  .lede {
+    font-size: 1.15rem;
+    color: var(--text-muted);
+    max-width: 640px;
+    margin: 0 0 32px;
+  }
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary {
+    background: var(--text);
+    color: var(--bg);
+  }
+  .btn-secondary {
+    background: var(--bg-elevated);
+    color: var(--text);
+    border-color: var(--border);
+  }
+
+  section { padding: 56px 0; border-bottom: 1px solid var(--border); }
+  section:last-of-type { border-bottom: none; }
+  h2 {
+    font-size: 1.5rem;
+    letter-spacing: -0.01em;
+    margin: 0 0 28px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px;
+    box-shadow: var(--shadow);
+  }
+  .card .icon { font-size: 1.5rem; margin-bottom: 10px; display: block; }
+  .card h3 { margin: 0 0 8px; font-size: 1rem; }
+  .card p { margin: 0; color: var(--text-muted); font-size: 0.92rem; }
+
+  .steps { counter-reset: step; list-style: none; margin: 0; padding: 0; }
+  .steps li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    gap: 14px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .steps li:last-child { border-bottom: none; }
+  .steps li::before {
+    content: counter(step);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .steps code { font-size: 0.85rem; }
+
+  pre {
+    background: var(--code-bg);
+    color: var(--code-text);
+    padding: 18px 20px;
+    border-radius: 12px;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    box-shadow: var(--shadow);
+  }
+  code {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding: 2px 6px;
+    border-radius: 5px;
+    font-size: 0.88em;
+  }
+  pre code { background: none; color: inherit; padding: 0; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--text-muted); font-weight: 600; }
+
+  .privacy-note {
+    background: var(--accent-soft);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    color: var(--text);
+    font-size: 0.92rem;
+  }
+
+  footer {
+    padding: 40px 0 64px;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  footer a { color: var(--text-muted); }
+
+  @media (max-width: 560px) {
+    header.hero { padding: 56px 0 40px; }
+    section { padding: 40px 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="hero">
+    <span class="eyebrow">🎙️ Open source · Local-first</span>
+    <h1>MacPocket</h1>
+    <p class="lede">
+      An AI voice note-taker for macOS — a software clone of the Pocket AI
+      hardware device. Record a meeting from your microphone or system
+      audio, transcribe it locally with Whisper, and get a summary with
+      action items in seconds.
+    </p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://github.com/New-AI-tech/ai-meeting-assistant/tree/main/macpocket">View on GitHub</a>
+      <a class="btn btn-secondary" href="#install">Get started</a>
+    </div>
+  </header>
+
+  <section>
+    <h2>Why MacPocket</h2>
+    <div class="grid">
+      <div class="card">
+        <span class="icon">🎙️</span>
+        <h3>Mic + system audio</h3>
+        <p>Capture your own voice, a Zoom/Meet call via BlackHole, or both — chunked recording keeps memory flat on long meetings.</p>
+      </div>
+      <div class="card">
+        <span class="icon">📝</span>
+        <h3>Local transcription</h3>
+        <p>Runs OpenAI's Whisper entirely on-device. Choose tiny/base/small/medium for your speed–accuracy tradeoff.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🤖</span>
+        <h3>Summary + action items</h3>
+        <p>A 3-bullet summary and a checklist of action items with inferred owners, via Ollama (local) or OpenAI (cloud).</p>
+      </div>
+      <div class="card">
+        <span class="icon">🔒</span>
+        <h3>Private by default</h3>
+        <p>Audio and transcripts never leave your Mac unless you explicitly opt into the OpenAI summarization backend.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2>Get started</h2>
+    <ol class="steps">
+      <li>
+        <div>
+          Clone the repo and enter the project folder
+          <pre><code>git clone https://github.com/New-AI-tech/ai-meeting-assistant.git
+cd ai-meeting-assistant/macpocket</code></pre>
+        </div>
+      </li>
+      <li>
+        <div>
+          Run the setup script — installs Homebrew deps (BlackHole, ffmpeg, portaudio) and a Python virtualenv
+          <pre><code>chmod +x setup.sh
+./setup.sh</code></pre>
+        </div>
+      </li>
+      <li>
+        <div>
+          Activate the environment and record your first note
+          <pre><code>source venv/bin/activate
+python main.py</code></pre>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>CLI reference</h2>
+    <table>
+      <thead>
+        <tr><th>Flag</th><th>Description</th><th>Default</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>-d, --device</code></td><td>Input device name (e.g. "BlackHole 2ch")</td><td>interactive prompt</td></tr>
+        <tr><td><code>-b, --backend</code></td><td>Summarizer: <code>local</code> (Ollama) or <code>openai</code></td><td><code>local</code></td></tr>
+        <tr><td><code>-m, --model</code></td><td>Whisper model size</td><td><code>base</code></td></tr>
+        <tr><td><code>-t, --duration</code></td><td>Fixed recording duration (seconds)</td><td>until <code>CTRL+C</code></td></tr>
+        <tr><td><code>--fp16</code></td><td>Faster Whisper inference on Apple Silicon</td><td>off</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Privacy</h2>
+    <p class="privacy-note">
+      With the default <code>local</code> backend, audio and transcripts stay
+      on your Mac the entire time. Switching to <code>--backend openai</code>
+      sends only the transcript text (never audio) to OpenAI for
+      summarization. Notes are saved locally to <code>~/MacPocket/Notes/</code>
+      — nothing is uploaded or synced anywhere by MacPocket itself.
+    </p>
+  </section>
+
+  <footer>
+    <span>MacPocket is open source.</span>
+    <span>
+      <a href="https://github.com/New-AI-tech/ai-meeting-assistant">Repository</a>
+      · <a href="https://github.com/New-AI-tech/ai-meeting-assistant/tree/main/macpocket#readme">Full documentation</a>
+    </span>
+  </footer>
+</div>
+
+</body>
+</html>
