@@ -1,0 +1,3 @@
+{
+  "entrypoint": "macpocket.main:app"
+}
