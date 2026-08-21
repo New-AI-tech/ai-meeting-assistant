@@ -1,33 +1,48 @@
 # MacPocket
 
-A local-first AI voice note-taker for macOS — a software clone of the
-Pocket AI hardware device. MacPocket records a meeting (from your
-microphone and/or system audio), transcribes it locally with OpenAI's
-Whisper, and produces a concise summary with action items using either a
-local LLM (Ollama) or OpenAI's API.
+A local-first, cross-platform AI voice note-taker — a software clone of
+the Pocket AI hardware device. Run one Python server on your computer
+(Mac, Windows, or Linux), then open a web page from **any device on the
+same network** — your laptop, phone, or tablet — hit record, and get a
+transcript and summary with action items, generated entirely on your own
+machine.
 
-Everything runs on your Mac. Your audio and transcript never leave your
-machine unless you explicitly choose the `openai` summarization backend.
+Your audio and transcript never leave your computer unless you
+explicitly choose the `openai` summarization backend.
 
 ## Features
 
-- 🎙️ Record from your microphone, system audio (via BlackHole), or both
+- 🌐 **Cross-platform web app** — one server, any browser, any device on your Wi-Fi
+- 🎙️ Record straight from the browser's microphone (no app install, no BlackHole needed for this flow)
 - 📝 Local, offline transcription with Whisper
-- 🤖 Summarization + action items via local LLM (Ollama/llama3.2) or
-  OpenAI (gpt-4o-mini)
-- 💾 Notes saved as timestamped `.txt` files in `~/MacPocket/Notes/`
-- 🧠 Chunked recording so long meetings don't blow up memory
+- 🤖 Summarization + action items via local LLM (Ollama/llama3.2) or OpenAI (gpt-4o-mini)
+- 💾 Notes saved as timestamped `.txt` files on the server, in `~/MacPocket/Notes/`
+- 📱 Mobile-first UI: big record button, live volume meter, clean results cards
+- 🖥️ Terminal CLI (`cli.py`) still available for debugging, with mic + system-audio (BlackHole) capture on macOS
+
+## How it works
+
+```
+Your phone / laptop browser  <-- Wi-Fi -->  Python server on your computer
+        (records mic)                        FastAPI + Whisper + Ollama/OpenAI
+```
+
+You run `python run.py` once, on one computer. Every device on the same
+network can then open that computer's address in a browser and use
+MacPocket — recording happens in the browser, everything else
+(transcription, summarization, storage) happens on the server.
 
 ## Requirements
 
-- macOS
-- [Homebrew](https://brew.sh)
 - Python 3.9+
-- [Ollama](https://ollama.com/download) (only if using the `local`
-  summarization backend, which is the default)
-- An OpenAI API key (only if using the `openai` summarization backend)
+- [Homebrew](https://brew.sh) (macOS/Linux, used by `setup.sh`)
+- ffmpeg (installed by `setup.sh`, or manually on Windows)
+- [Ollama](https://ollama.com/download) (only for the `local` summarization backend, the default)
+- An OpenAI API key (only for the `openai` summarization backend)
 
 ## Installation
+
+### macOS / Linux
 
 ```bash
 git clone <this-repo>
@@ -38,122 +53,194 @@ chmod +x setup.sh
 
 `setup.sh` will:
 
-1. Check for Homebrew (and offer to install it if missing).
-2. Install `blackhole-2ch` (system audio capture) via Homebrew, if not
-   already installed.
-3. Install `ffmpeg` and `portaudio` (required by Whisper and
-   `sounddevice`).
-4. Create a virtual environment (`./venv`) and install everything in
-   `requirements.txt`.
-5. Check for Ollama and tell you how to pull the `llama3.2` model if
-   you plan to use the local summarization backend.
+1. Check for Homebrew (offering to install it if missing).
+2. Install `ffmpeg` and `portaudio` (needed by Whisper, `pydub`, and the CLI fallback).
+3. Install BlackHole 2ch (optional — only used by the CLI fallback for system-audio capture).
+4. Create a virtual environment (`./venv`) and install everything in `requirements.txt` (FastAPI, uvicorn, python-multipart, pydub, Whisper, ...).
+5. Check for Ollama and tell you how to pull the `llama3.2` model.
+6. **Optionally set up local HTTPS** with [mkcert](https://github.com/FiloSottile/mkcert) — see [Recording from a phone](#recording-from-a-phone-https) below for why this matters.
 
-If you'd rather do it by hand:
+### Windows
 
-```bash
-brew install blackhole-2ch ffmpeg portaudio
-python3 -m venv venv
-source venv/bin/activate
+`setup.sh` is a bash script and won't run natively on Windows. Instead:
+
+```powershell
+python -m venv venv
+venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## Usage
+Install ffmpeg (required by Whisper and `pydub` for decoding uploaded audio):
+
+```powershell
+choco install ffmpeg
+# or
+scoop install ffmpeg
+```
+
+`python-multipart` (for file uploads) is already in `requirements.txt` and
+installs automatically with the command above.
+
+## Running the server
 
 ```bash
-source venv/bin/activate
-python main.py
+source venv/bin/activate      # Windows: venv\Scripts\activate
+python run.py
 ```
 
-By default, MacPocket will list your available input devices and ask you
-to pick one, record using the local Whisper `base` model, summarize with
-Ollama's `llama3.2`, and record until you press `CTRL+C`.
-
-### CLI flags
-
-| Flag | Short | Description | Default |
-|---|---|---|---|
-| `--device` | `-d` | Input device name (e.g. `"BlackHole 2ch"` or `"MacBook Pro Microphone"`). If omitted, MacPocket lists devices and prompts you. | *(interactive)* |
-| `--backend` | `-b` | Summarization backend: `local` (Ollama) or `openai` (GPT-4o-mini). | `local` |
-| `--model` | `-m` | Whisper model size: `tiny`, `base`, `small`, `medium`, `large`. | `base` |
-| `--duration` | `-t` | Fixed recording duration in seconds. If omitted, records until `CTRL+C`. | *(infinite)* |
-| `--fp16` | | Enable fp16 inference in Whisper. Speeds things up on Apple Silicon (M1/M2/M3). Leave off on Intel Macs. | off |
-| `--title` | | Title for the note. If omitted, you'll be prompted after transcription. | *(prompted)* |
-
-### Examples
-
-Record your microphone until you hit `CTRL+C`, transcribe with the
-`base` model, and summarize locally:
+This starts the FastAPI server on port `8000`. Equivalent manual command:
 
 ```bash
-python main.py --device "MacBook Pro Microphone"
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Record a Zoom call's system audio via BlackHole, use the more accurate
-`small` Whisper model, and summarize with OpenAI:
+Open **http://localhost:8000** in a browser on the same computer to try
+it immediately.
+
+## Connecting from your phone or another device
+
+1. **Find this computer's local IP address:**
+
+   | OS | Command |
+   |---|---|
+   | macOS | `ipconfig getifaddr en0` (Wi-Fi) or `ifconfig \| grep "inet "` |
+   | Linux | `hostname -I` or `ip addr show` |
+   | Windows | `ipconfig` (look for "IPv4 Address" under your active adapter) |
+
+   You'll get something like `192.168.1.42`.
+
+2. **Make sure your phone is on the same Wi-Fi network** as this computer.
+
+3. Open `http://<that-ip>:8000` in your phone's browser, e.g.
+   `http://192.168.1.42:8000`.
+
+4. **Scan-to-open with a QR code** — paste your URL into this pattern and
+   open (or embed) the image; it generates a scannable QR code for free
+   via [api.qrserver.com](https://goqr.me/api/):
+
+   ```html
+   <img src="https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=http://192.168.1.42:8000">
+   ```
+
+   Replace `192.168.1.42:8000` with your actual IP and port. Scan it with
+   your phone's camera to jump straight to the page.
+
+### Recording from a phone (HTTPS)
+
+Browsers only allow microphone access (`getUserMedia`) on a **secure
+context** — HTTPS, or the special case of `localhost`. Your phone
+connecting to `http://192.168.x.x:8000` is *not* a secure context, so
+**iOS Safari and most browsers will silently block the microphone** on
+that URL. The MacPocket page detects this and shows a banner explaining
+why the record button is disabled.
+
+To fix it, give the server a real (locally-trusted) HTTPS certificate
+with [mkcert](https://github.com/FiloSottile/mkcert):
 
 ```bash
-export OPENAI_API_KEY="sk-..."
-python main.py --device "BlackHole 2ch" --model small --backend openai
+brew install mkcert nss   # nss needed if you use Firefox
+mkcert -install
+mkdir -p certs
+mkcert -cert-file certs/cert.pem -key-file certs/key.pem localhost 127.0.0.1 <your-local-ip>
 ```
 
-Record for a fixed 30-minute block (e.g. a scheduled standup):
+`setup.sh` offers to do this for you automatically. Once `certs/cert.pem`
+and `certs/key.pem` exist, `python run.py` automatically serves over
+HTTPS — connect to `https://<your-local-ip>:8000` from your phone
+instead. Because the certificate is only trusted by mkcert's local
+root CA, your phone will need that CA trusted too (mkcert prints
+instructions for this — usually installing a profile on iOS, or a
+similar step on Android) or you'll see a certificate warning you can
+click through for local testing.
+
+If you'd rather not deal with certificates, tools like
+[`ngrok`](https://ngrok.com) or [`cloudflared`](https://github.com/cloudflare/cloudflared)
+can tunnel `localhost:8000` to a temporary public HTTPS URL, which sidesteps
+this entirely (at the cost of your recording briefly leaving your LAN in
+transit).
+
+## Using the web app
+
+1. Open the page (see above).
+2. Tap the gear icon to choose a Whisper model size, summarization
+   backend, and an optional meeting title.
+3. Tap the big red button to start recording — you'll see a live volume
+   meter and timer.
+4. Tap it again to stop. The recording uploads automatically and
+   MacPocket transcribes and summarizes it.
+5. Read the summary, action items, and full transcript on the results
+   screen. The note is also saved to `~/MacPocket/Notes/` on the server.
+
+## API reference
+
+### `GET /`
+
+Serves the web UI (`static/index.html`).
+
+### `POST /upload-audio`
+
+Multipart form upload:
+
+| Field | Type | Description |
+|---|---|---|
+| `file` | file | The recorded audio clip (webm, mp4/m4a, ogg, wav — anything ffmpeg can decode) |
+| `backend` | string | `local` or `openai`. Default `local`. |
+| `model` | string | Whisper model size: `tiny`, `base`, `small`, `medium`. Default `base`. |
+| `title` | string | Optional meeting title. |
+
+Response `200`:
+
+```json
+{
+  "transcript": "...",
+  "summary": "## Summary\n- ...\n\n## Action Items\n- [ ] ...",
+  "note_path": "/Users/you/MacPocket/Notes/Meeting_2026-08-21_09-00-00.txt"
+}
+```
+
+Errors return `4xx`/`5xx` with `{"detail": "..."}`.
+
+### `WS /ws`
+
+Reserved for future live-streaming transcription. Not used by the
+current frontend, which uploads a complete clip after recording stops;
+today it just accepts the connection and closes with an explanatory
+message.
+
+## The CLI fallback
+
+For debugging the record → transcribe → summarize pipeline without a
+browser, or for macOS system-audio capture via BlackHole:
 
 ```bash
-python main.py --duration 1800
+python cli.py --device "BlackHole 2ch" --backend local --model base
 ```
 
-Let MacPocket list devices and prompt you interactively:
+See `python cli.py --help` for all flags. This is the same recording
+flow MacPocket originally shipped with; it's kept around for local
+debugging and for the BlackHole system-audio use case the browser can't
+do on its own. See [Capturing system audio](#capturing-system-audio-cli-only)
+below.
 
-```bash
-python main.py
-```
+## Capturing system audio (CLI only)
 
-## Capturing system audio (e.g. Zoom, Google Meet) with BlackHole
+Browsers can only record from the microphone, not "whatever the computer
+is playing" — so capturing a Zoom/Meet call's audio still requires the
+CLI and BlackHole, exactly as before:
 
-BlackHole is a virtual audio driver that lets MacPocket "listen in" on
-whatever your Mac is playing. By itself, routing your system output to
-BlackHole means *you* won't hear the meeting anymore — so you'll want to
-create a **Multi-Output Device** that sends audio to both your speakers
-*and* BlackHole simultaneously.
-
-1. Install BlackHole (done automatically by `setup.sh`, or manually via
-   `brew install blackhole-2ch`).
-2. Open **Audio MIDI Setup** (Spotlight search → "Audio MIDI Setup").
-3. Click the **`+`** button in the bottom-left corner and choose
-   **Create Multi-Output Device**.
-4. In the new Multi-Output Device's checklist, check both:
-   - Your normal output (e.g. "MacBook Pro Speakers")
-   - **BlackHole 2ch**
-5. Rename it if you like (e.g. "Meeting Output").
-6. Go to **System Settings → Sound → Output** and select your new
-   Multi-Output Device.
-7. In whatever meeting app you're using (Zoom, Meet, etc.), leave its
-   output as your Multi-Output Device (or System Default), and run
-   MacPocket with `--device "BlackHole 2ch"` to capture that audio.
-
-To capture **both** your microphone and the other participants' system
-audio in one recording, you can instead create an **Aggregate Device**
-combining your microphone and BlackHole 2ch, then select that aggregate
-device in MacPocket.
-
-If BlackHole isn't installed, MacPocket will detect this and print
-install instructions instead of crashing:
-
-```
-[MacPocket] Could not find the 'BlackHole 2ch' input device.
-...
-To install it, run:
-    brew install blackhole-2ch
-```
+1. Install BlackHole: `brew install blackhole-2ch`.
+2. Open **Audio MIDI Setup** → **+** → **Create Multi-Output Device**,
+   check both your speakers and **BlackHole 2ch**.
+3. Set your Mac's output to that Multi-Output Device.
+4. Run `python cli.py --device "BlackHole 2ch"`.
 
 ## Output format
 
-Notes are saved to `~/MacPocket/Notes/Meeting_YYYY-MM-DD_HH-MM-SS.txt`,
-containing:
+Notes are saved to `~/MacPocket/Notes/Meeting_YYYY-MM-DD_HH-MM-SS.txt`:
 
 ```
 Title: <your title>
-Date: 2026-08-20 14:32:10
+Date: 2026-08-21 09:00:00
 ============================================================
 
 TRANSCRIPT
@@ -169,38 +256,29 @@ SUMMARY & ACTION ITEMS
 
 ## Action Items
 - [ ] ... (Owner: ...)
-- [ ] ... (Owner: ...)
 ```
-
-The summary and action items are also printed to the terminal when the
-run finishes.
 
 ## Choosing a summarization backend
 
 ### Local (default) — Ollama + llama3.2
 
-Runs entirely on-device, no API key or internet connection required
-after the model is pulled.
-
 ```bash
-brew install ollama   # or download from https://ollama.com/download
+brew install ollama   # or https://ollama.com/download
 ollama pull llama3.2
-python main.py --backend local
 ```
 
-If Ollama isn't running or the model hasn't been pulled, MacPocket will
-catch the error and print these exact steps.
+Runs entirely on-device. If Ollama isn't running or the model hasn't
+been pulled, the server returns a clear error explaining these steps.
 
 ### Cloud — OpenAI GPT-4o-mini
 
-Requires an API key set via the `OPENAI_API_KEY` environment variable
-(or a `.env` file in the project directory, since MacPocket loads
-`python-dotenv` automatically):
-
 ```bash
 export OPENAI_API_KEY="sk-..."
-python main.py --backend openai
 ```
+
+Set it before running `python run.py`, or put it in a `.env` file in the
+project directory (loaded automatically via `python-dotenv`). Select
+"Cloud (OpenAI)" in the app's settings panel.
 
 ## Whisper model sizes & performance
 
@@ -210,44 +288,51 @@ python main.py --backend openai
 | `base` | fast | Default — good balance for most meetings |
 | `small` | moderate | Better accuracy, still reasonably fast |
 | `medium` | slow | High accuracy, needs more RAM/CPU |
-| `large` | slowest | Best accuracy, requires significant resources |
 
-By default, MacPocket runs Whisper with `fp16=False` for compatibility
-with Intel Macs (fp16 on CPU can be unstable). If you're on Apple
-Silicon (M1/M2/M3), pass `--fp16` for a speed boost:
-
-```bash
-python main.py --model small --fp16
-```
+The server keeps loaded Whisper models cached in memory between
+requests, so only the first transcription with a given model size pays
+the load-time cost.
 
 ## Troubleshooting
 
-**"No input devices found" / microphone not detected**
-Check **System Settings → Privacy & Security → Microphone** and make
-sure Terminal (or whichever app you're running Python from) has
-permission to access the microphone.
+**Record button is disabled / grey**
+You're on a non-HTTPS, non-localhost page — see
+[Recording from a phone](#recording-from-a-phone-https) above.
 
-**BlackHole device not found**
-Run `brew install blackhole-2ch`, then restart Terminal. MacPocket will
-also print this instruction automatically if it detects the issue.
+**"Couldn't access the microphone" error**
+Check your browser's site permissions for the page and allow microphone
+access.
+
+**"Could not decode the uploaded audio"**
+ffmpeg isn't installed (or isn't on `PATH`) on the machine running the
+server. Re-run `setup.sh`, or install ffmpeg manually.
 
 **Ollama connection errors**
 Make sure the Ollama app/daemon is running and you've pulled the model:
 `ollama pull llama3.2`.
 
+**Phone can't reach the server at all**
+Confirm both devices are on the same Wi-Fi network (not a guest network
+that isolates clients from each other), and that no firewall is blocking
+port 8000 on the server machine.
+
 **Whisper is slow**
-Try a smaller model (`--model tiny` or `--model base`), or add `--fp16`
-if you're on Apple Silicon.
+Try a smaller model (`tiny` or `base`) in the settings panel.
 
 ## Project structure
 
 ```
 macpocket/
-├── main.py          # CLI entry point — orchestrates record → transcribe → summarize → save
-├── recorder.py       # Audio capture (sounddevice), device resolution, BlackHole handling
-├── transcriber.py    # Local Whisper transcription
-├── summarizer.py      # Ollama / OpenAI summarization backends
-├── config.py          # Defaults, paths, prompt template, constants
+├── main.py            # FastAPI app: serves the web UI, POST /upload-audio, /ws
+├── run.py              # Launches uvicorn (with HTTPS if certs/ exists)
+├── cli.py               # Terminal CLI fallback (record/transcribe/summarize)
+├── recorder.py           # Audio capture (sounddevice) used by cli.py
+├── transcriber.py         # Local Whisper transcription (array- and file-based)
+├── summarizer.py           # Ollama / OpenAI summarization backends
+├── config.py                 # Defaults, paths, prompt template, constants
+├── static/
+│   └── index.html              # Mobile-first web UI (HTML/CSS/JS, no build step)
+├── certs/                        # (optional, gitignored) local HTTPS cert/key
 ├── requirements.txt
 ├── setup.sh
 └── README.md
@@ -255,9 +340,11 @@ macpocket/
 
 ## Privacy
 
-- Audio and transcripts stay on your Mac at all times when using the
-  default `local` backend.
+- Audio and transcripts stay on your computer at all times when using
+  the default `local` backend.
 - The `openai` backend sends only the **transcript text** (not audio) to
   OpenAI's API for summarization.
-- Notes are stored locally in `~/MacPocket/Notes/`. Nothing is uploaded
-  or synced anywhere by MacPocket itself.
+- Notes are stored locally in `~/MacPocket/Notes/` on the server
+  machine. Nothing is uploaded or synced anywhere by MacPocket itself.
+- Recordings are converted and transcribed in a temporary upload folder
+  (`~/MacPocket/uploads/`) and deleted immediately after processing.

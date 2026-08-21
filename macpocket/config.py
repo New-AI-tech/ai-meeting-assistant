@@ -8,8 +8,16 @@ from pathlib import Path
 # --- Paths -------------------------------------------------------------
 
 NOTES_DIR = Path(os.path.expanduser("~/MacPocket/Notes"))
+UPLOAD_FOLDER = Path(os.path.expanduser("~/MacPocket/uploads"))
 FILENAME_TIMESTAMP_FMT = "%Y-%m-%d_%H-%M-%S"
 FILENAME_PREFIX = "Meeting_"
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+# --- Server ---------------------------------------------------------------
+
+SERVER_HOST = "0.0.0.0"
+SERVER_PORT = 8000
 
 # --- Audio ---------------------------------------------------------------
 

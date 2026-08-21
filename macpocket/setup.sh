@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 #
-# setup.sh — One-shot setup for MacPocket on macOS.
+# setup.sh — One-shot setup for the MacPocket web app on macOS/Linux.
 #
 # - Verifies Homebrew is installed (installs it if missing, with confirmation)
 # - Installs BlackHole 2ch (for system-audio capture) if missing
-# - Installs ffmpeg and portaudio (required by whisper / sounddevice)
+# - Installs ffmpeg and portaudio (required by whisper / sounddevice / pydub)
 # - Creates a Python virtual environment in ./venv
-# - Installs Python dependencies from requirements.txt
+# - Installs Python dependencies from requirements.txt (FastAPI, uvicorn,
+#   python-multipart, pydub, whisper, ...)
+# - Optionally sets up a local HTTPS certificate (mkcert) so phones on your
+#   Wi-Fi can grant microphone access to the page
+#
+# Windows users: this is a bash script and won't run natively. Install
+# Python 3.9+ and ffmpeg (e.g. `choco install ffmpeg` or `scoop install
+# ffmpeg`) yourself, then run:
+#   python -m venv venv
+#   venv\Scripts\activate
+#   pip install -r requirements.txt
 #
 # Usage:
 #   chmod +x setup.sh
@@ -114,11 +124,48 @@ else
     warn "Alternatively, use '--backend openai' with an OPENAI_API_KEY set."
 fi
 
+# --- 7. Optional: local HTTPS for phone access (mkcert) --------------------
+#
+# Phones (especially iOS Safari) block microphone access on pages loaded
+# over plain HTTP unless the host is "localhost". To record from a phone
+# on your Wi-Fi, the server needs a real HTTPS certificate for its local
+# IP -- mkcert generates one that's automatically trusted on this Mac.
+
+if [[ -f "certs/cert.pem" && -f "certs/key.pem" ]]; then
+    info "Local HTTPS certificate already exists in ./certs."
+else
+    echo
+    read -r -p "Set up local HTTPS now so phones can use the microphone? [y/N] " reply
+    if [[ "$reply" =~ ^[Yy]$ ]]; then
+        if ! command -v mkcert >/dev/null 2>&1; then
+            info "Installing mkcert..."
+            brew install mkcert nss || warn "mkcert install failed -- you can retry with: brew install mkcert nss"
+        fi
+        if command -v mkcert >/dev/null 2>&1; then
+            mkcert -install
+            mkdir -p certs
+            LOCAL_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')"
+            if [[ -n "$LOCAL_IP" ]]; then
+                info "Generating certificate for localhost, 127.0.0.1, and $LOCAL_IP..."
+                mkcert -cert-file certs/cert.pem -key-file certs/key.pem localhost 127.0.0.1 "$LOCAL_IP"
+            else
+                warn "Could not detect your local IP automatically."
+                warn "Run manually: mkcert -cert-file certs/cert.pem -key-file certs/key.pem localhost 127.0.0.1 <your-local-ip>"
+            fi
+        fi
+    else
+        info "Skipping local HTTPS. You can set it up later -- see README.md."
+    fi
+fi
+
 info "Setup complete!"
 echo
 echo "To get started:"
 echo "  1. source venv/bin/activate"
-echo "  2. python main.py --help"
+echo "  2. python run.py"
+echo "  3. Open the printed URL on this computer, or from your phone on the"
+echo "     same Wi-Fi using this Mac's local IP (see README.md)."
 echo
 echo "See README.md for how to set up a Multi-Output Device so you can"
-echo "capture system audio (e.g. Zoom/Meet calls) while still hearing them."
+echo "capture system audio (e.g. Zoom/Meet calls) while still hearing them,"
+echo "and for the CLI fallback (python cli.py) used for debugging."

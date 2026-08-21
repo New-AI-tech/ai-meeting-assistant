@@ -1,18 +1,25 @@
-#!/usr/bin/env python3
 """
-main.py — MacPocket: a local-first AI voice note-taker for macOS.
+main.py — MacPocket FastAPI server.
 
-Records a meeting from a microphone or system audio (via BlackHole),
-transcribes it locally with Whisper, and produces a summary + action
-items using either a local LLM (Ollama) or OpenAI's API.
+Serves the mobile-first web UI (static/index.html) and an /upload-audio
+endpoint: the browser records audio locally (MediaRecorder API) and
+uploads the finished clip here for local transcription (Whisper) and
+summarization (Ollama or OpenAI). Any device on the same network can
+connect to this server's local IP and use MacPocket from its browser.
+
+Run with:  python run.py
+Or:        uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 """
 
-import argparse
-import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from config import (
     DEFAULT_BACKEND,
@@ -22,85 +29,77 @@ from config import (
     FILENAME_PREFIX,
     FILENAME_TIMESTAMP_FMT,
     NOTES_DIR,
-    SAMPLE_RATE,
+    STATIC_DIR,
     SUMMARY_BACKENDS,
+    UPLOAD_FOLDER,
     WHISPER_MODELS,
 )
-from recorder import (
-    BlackHoleNotInstalledError,
-    DeviceNotFoundError,
-    Recorder,
-    resolve_device,
-)
 from summarizer import SummarizationError, summarize
-from transcriber import TranscriptionError, transcribe_audio
+from transcriber import TranscriptionError, transcribe_file
+
+load_dotenv()
+
+app = FastAPI(title="MacPocket")
+
+# Local-network use: phones/tablets on the same Wi-Fi hit this server by IP,
+# so the origin is unpredictable ahead of time. Restrict methods instead.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-def parse_args(argv=None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        prog="macpocket",
-        description="MacPocket — a local-first AI voice note-taker for macOS.",
-    )
-    parser.add_argument(
-        "-d", "--device",
-        type=str,
-        default=None,
-        help=(
-            "Input device name (e.g. 'BlackHole 2ch' or 'MacBook Pro "
-            "Microphone'). If omitted, MacPocket lists available devices "
-            "and lets you choose interactively."
-        ),
-    )
-    parser.add_argument(
-        "-b", "--backend",
-        type=str,
-        choices=SUMMARY_BACKENDS,
-        default=DEFAULT_BACKEND,
-        help=f"Summarization backend to use. Default: '{DEFAULT_BACKEND}'.",
-    )
-    parser.add_argument(
-        "-m", "--model",
-        type=str,
-        choices=WHISPER_MODELS,
-        default=DEFAULT_WHISPER_MODEL,
-        help=f"Whisper model size for transcription. Default: '{DEFAULT_WHISPER_MODEL}'.",
-    )
-    parser.add_argument(
-        "-t", "--duration",
-        type=float,
-        default=None,
-        help="Fixed recording duration in seconds. If omitted, records until CTRL+C.",
-    )
-    parser.add_argument(
-        "--fp16",
-        action="store_true",
-        default=DEFAULT_FP16,
-        help=(
-            "Enable fp16 inference for Whisper (faster on Apple Silicon "
-            "M1/M2/M3). Leave disabled on Intel Macs to avoid instability."
-        ),
-    )
-    parser.add_argument(
-        "--title",
-        type=str,
-        default=None,
-        help="Title for the meeting note. Defaults to a prompt at save time.",
-    )
-    return parser.parse_args(argv)
+@app.get("/")
+def index() -> FileResponse:
+    return FileResponse(str(STATIC_DIR / "index.html"))
 
 
-def ensure_notes_dir() -> Path:
+def _ensure_dirs() -> None:
+    UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
     NOTES_DIR.mkdir(parents=True, exist_ok=True)
-    return NOTES_DIR
 
 
-def build_output_path() -> Path:
+def _convert_to_wav(src_path: Path, dst_path: Path) -> None:
+    """Normalize whatever format the browser recorded (webm/opus, mp4/aac,
+    ogg, ...) into a mono 16kHz WAV file using pydub (which shells out to
+    ffmpeg). Whisper can technically decode most formats directly via
+    ffmpeg too, but converting up front lets us fail fast on a corrupt
+    upload with a clear error instead of a confusing Whisper stack trace.
+    """
+    try:
+        from pydub import AudioSegment
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "The 'pydub' package is not installed on the server. "
+                "Install it with: pip install -r requirements.txt"
+            ),
+        ) from exc
+
+    try:
+        audio = AudioSegment.from_file(src_path)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Could not decode the uploaded audio. Make sure ffmpeg is "
+                f"installed on the server. Original error: {exc}"
+            ),
+        ) from exc
+
+    audio = audio.set_channels(1).set_frame_rate(16000)
+    audio.export(dst_path, format="wav")
+
+
+def _write_note(title: str, transcript: str, summary: str) -> Path:
     timestamp = datetime.now().strftime(FILENAME_TIMESTAMP_FMT)
-    filename = f"{FILENAME_PREFIX}{timestamp}.txt"
-    return NOTES_DIR / filename
-
-
-def write_note(path: Path, title: str, transcript: str, summary: str) -> None:
+    note_path = NOTES_DIR / f"{FILENAME_PREFIX}{timestamp}.txt"
     content = (
         f"Title: {title}\n"
         f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -112,94 +111,90 @@ def write_note(path: Path, title: str, transcript: str, summary: str) -> None:
         f"{'-' * 60}\n"
         f"{summary.strip()}\n"
     )
-    path.write_text(content, encoding="utf-8")
+    note_path.write_text(content, encoding="utf-8")
+    return note_path
 
 
-def main(argv=None) -> int:
-    load_dotenv()
-    args = parse_args(argv)
-
-    print("MacPocket — AI voice note-taker for macOS\n")
-
-    # --- Resolve audio device -------------------------------------------
-    try:
-        device = resolve_device(args.device)
-    except BlackHoleNotInstalledError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-    except DeviceNotFoundError as exc:
-        print(f"[MacPocket] {exc}", file=sys.stderr)
-        return 1
-
-    print(f"[MacPocket] Using input device: {device['name']} (index {device['index']})")
-
-    channels = min(2, max(1, device.get("max_input_channels", 1)))
-
-    # --- Record ------------------------------------------------------------
-    recorder = Recorder(
-        device_index=device["index"],
-        sample_rate=SAMPLE_RATE,
-        channels=channels,
-    )
-    try:
-        audio = recorder.record(duration=args.duration)
-    except Exception as exc:
-        print(f"[MacPocket] Recording failed: {exc}", file=sys.stderr)
-        return 1
-
-    if audio.size == 0:
-        print("[MacPocket] No audio was captured. Exiting without saving a note.",
-              file=sys.stderr)
-        return 1
-
-    # --- Transcribe ------------------------------------------------------
-    try:
-        transcript = transcribe_audio(
-            audio,
-            model_size=args.model,
-            sample_rate=SAMPLE_RATE,
-            fp16=args.fp16,
+@app.post("/upload-audio")
+async def upload_audio(
+    file: UploadFile = File(...),
+    backend: str = Form(DEFAULT_BACKEND),
+    model: str = Form(DEFAULT_WHISPER_MODEL),
+    title: str = Form(""),
+) -> JSONResponse:
+    if backend not in SUMMARY_BACKENDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown backend '{backend}'. Choose from: {', '.join(SUMMARY_BACKENDS)}",
         )
-    except TranscriptionError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
+    if model not in WHISPER_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown Whisper model '{model}'. Choose from: {', '.join(WHISPER_MODELS)}",
+        )
 
-    if not transcript.strip():
-        print("[MacPocket] Whisper produced an empty transcript "
-              "(silence or inaudible audio). Exiting without saving a note.",
-              file=sys.stderr)
-        return 1
+    _ensure_dirs()
 
-    # --- Summarize -------------------------------------------------------
+    # Unique filenames so concurrent uploads from different devices never
+    # collide or clobber each other's temp files.
+    upload_id = uuid.uuid4().hex
+    suffix = Path(file.filename or "").suffix or ".webm"
+    raw_path = UPLOAD_FOLDER / f"{upload_id}_upload{suffix}"
+    wav_path = UPLOAD_FOLDER / f"{upload_id}.wav"
+
     try:
-        summary = summarize(transcript, backend=args.backend)
-    except SummarizationError as exc:
-        print(str(exc), file=sys.stderr)
-        print("\n[MacPocket] Saving the transcript anyway (without a summary).\n",
-              file=sys.stderr)
-        summary = "(Summary unavailable — see error above.)"
+        contents = await file.read()
+        if not contents:
+            raise HTTPException(status_code=400, detail="Uploaded audio file is empty.")
+        raw_path.write_bytes(contents)
 
-    # --- Save + print ------------------------------------------------------
-    title = args.title
-    if not title:
+        _convert_to_wav(raw_path, wav_path)
+
         try:
-            title = input(f"\nMeeting title [{DEFAULT_MEETING_TITLE}]: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            title = ""
-        if not title:
-            title = DEFAULT_MEETING_TITLE
+            transcript = transcribe_file(str(wav_path), model_size=model, fp16=DEFAULT_FP16)
+        except TranscriptionError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    ensure_notes_dir()
-    output_path = build_output_path()
-    write_note(output_path, title, transcript, summary)
+        if not transcript.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="Whisper produced an empty transcript (silence or inaudible audio).",
+            )
 
-    print(f"\n[MacPocket] Note saved to: {output_path}\n")
-    print("=" * 60)
-    print(summary)
-    print("=" * 60)
+        try:
+            summary = summarize(transcript, backend=backend)
+        except SummarizationError as exc:
+            # Still return the transcript — a summarizer outage shouldn't
+            # throw away a transcription that already succeeded.
+            summary = f"(Summary unavailable: {exc})"
 
-    return 0
+        note_title = title.strip() or DEFAULT_MEETING_TITLE
+        note_path = _write_note(note_title, transcript, summary)
+
+        return JSONResponse(
+            {
+                "transcript": transcript,
+                "summary": summary,
+                "note_path": str(note_path),
+            }
+        )
+    finally:
+        raw_path.unlink(missing_ok=True)
+        wav_path.unlink(missing_ok=True)
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket) -> None:
+    """
+    Reserved for future live-streaming transcription (send audio chunks as
+    they're captured instead of waiting for the full recording to upload).
+    Not used by the current frontend, which uploads a complete clip to
+    /upload-audio once recording stops.
+    """
+    await websocket.accept()
+    try:
+        await websocket.send_json(
+            {"error": "Live streaming isn't implemented yet — use POST /upload-audio."}
+        )
+    finally:
+        await websocket.close()

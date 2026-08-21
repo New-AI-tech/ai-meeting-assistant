@@ -222,13 +222,14 @@
 
 <div class="wrap">
   <header class="hero">
-    <span class="eyebrow">🎙️ Open source · Local-first</span>
+    <span class="eyebrow">🎙️ Open source · Local-first · Cross-platform</span>
     <h1>MacPocket</h1>
     <p class="lede">
-      An AI voice note-taker for macOS — a software clone of the Pocket AI
-      hardware device. Record a meeting from your microphone or system
-      audio, transcribe it locally with Whisper, and get a summary with
-      action items in seconds.
+      An AI voice note-taker — a software clone of the Pocket AI hardware
+      device. Run one Python server on your Mac, Windows, or Linux
+      machine, then record from a browser on <em>any</em> device on your
+      Wi-Fi — laptop, phone, or tablet. Transcribed locally with Whisper,
+      summarized with action items in seconds.
     </p>
     <div class="cta-row">
       <a class="btn btn-primary" href="https://github.com/New-AI-tech/ai-meeting-assistant/tree/main/macpocket">View on GitHub</a>
@@ -240,9 +241,9 @@
     <h2>Why MacPocket</h2>
     <div class="grid">
       <div class="card">
-        <span class="icon">🎙️</span>
-        <h3>Mic + system audio</h3>
-        <p>Capture your own voice, a Zoom/Meet call via BlackHole, or both — chunked recording keeps memory flat on long meetings.</p>
+        <span class="icon">🌐</span>
+        <h3>Any device on your Wi-Fi</h3>
+        <p>One server, any browser — record from your phone or tablet while everything runs on your computer.</p>
       </div>
       <div class="card">
         <span class="icon">📝</span>
@@ -257,7 +258,7 @@
       <div class="card">
         <span class="icon">🔒</span>
         <h3>Private by default</h3>
-        <p>Audio and transcripts never leave your Mac unless you explicitly opt into the OpenAI summarization backend.</p>
+        <p>Audio and transcripts never leave your computer unless you explicitly opt into the OpenAI summarization backend.</p>
       </div>
     </div>
   </section>
@@ -274,45 +275,51 @@ cd ai-meeting-assistant/macpocket</code></pre>
       </li>
       <li>
         <div>
-          Run the setup script — installs Homebrew deps (BlackHole, ffmpeg, portaudio) and a Python virtualenv
+          Run the setup script — installs Homebrew deps (ffmpeg, portaudio), a Python virtualenv, and optionally a local HTTPS certificate for phone access
           <pre><code>chmod +x setup.sh
 ./setup.sh</code></pre>
         </div>
       </li>
       <li>
         <div>
-          Activate the environment and record your first note
+          Start the server, then open the URL on this computer — or from your phone on the same Wi-Fi using this computer's local IP
           <pre><code>source venv/bin/activate
-python main.py</code></pre>
+python run.py</code></pre>
         </div>
       </li>
     </ol>
   </section>
 
   <section>
-    <h2>CLI reference</h2>
+    <h2>Web app at a glance</h2>
     <table>
       <thead>
-        <tr><th>Flag</th><th>Description</th><th>Default</th></tr>
+        <tr><th>Setting</th><th>Description</th><th>Default</th></tr>
       </thead>
       <tbody>
-        <tr><td><code>-d, --device</code></td><td>Input device name (e.g. "BlackHole 2ch")</td><td>interactive prompt</td></tr>
-        <tr><td><code>-b, --backend</code></td><td>Summarizer: <code>local</code> (Ollama) or <code>openai</code></td><td><code>local</code></td></tr>
-        <tr><td><code>-m, --model</code></td><td>Whisper model size</td><td><code>base</code></td></tr>
-        <tr><td><code>-t, --duration</code></td><td>Fixed recording duration (seconds)</td><td>until <code>CTRL+C</code></td></tr>
-        <tr><td><code>--fp16</code></td><td>Faster Whisper inference on Apple Silicon</td><td>off</td></tr>
+        <tr><td>Backend</td><td>Summarizer: <code>local</code> (Ollama) or <code>openai</code></td><td><code>local</code></td></tr>
+        <tr><td>Whisper model</td><td>tiny / base / small / medium</td><td><code>base</code></td></tr>
+        <tr><td>Title</td><td>Optional meeting title, set before recording</td><td>"Untitled Meeting"</td></tr>
       </tbody>
     </table>
+    <p style="margin-top:16px;color:var(--text-muted);font-size:0.92rem;">
+      A terminal CLI (<code>python cli.py</code>) is also included for
+      debugging the pipeline directly, and for macOS system-audio capture
+      via BlackHole. See the
+      <a href="https://github.com/New-AI-tech/ai-meeting-assistant/tree/main/macpocket#readme">full README</a>
+      for details.
+    </p>
   </section>
 
   <section>
     <h2>Privacy</h2>
     <p class="privacy-note">
       With the default <code>local</code> backend, audio and transcripts stay
-      on your Mac the entire time. Switching to <code>--backend openai</code>
-      sends only the transcript text (never audio) to OpenAI for
+      on your computer the entire time. Switching to the <code>openai</code>
+      backend sends only the transcript text (never audio) to OpenAI for
       summarization. Notes are saved locally to <code>~/MacPocket/Notes/</code>
-      — nothing is uploaded or synced anywhere by MacPocket itself.
+      on the server machine — nothing is uploaded or synced anywhere by
+      MacPocket itself.
     </p>
   </section>
 
