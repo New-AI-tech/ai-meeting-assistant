@@ -287,6 +287,84 @@
     margin-top: 16px;
   }
   .error-banner.show { display: block; }
+
+  /* --- Tunnel banner --- */
+  .tunnel-banner {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+  }
+  .tunnel-banner.show { display: flex; }
+  .tunnel-banner img {
+    width: 64px;
+    height: 64px;
+    border-radius: 8px;
+    background: #fff;
+    flex-shrink: 0;
+  }
+  .tunnel-text { flex: 1; min-width: 0; }
+  .tunnel-text strong {
+    display: block;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+  .tunnel-text a {
+    display: block;
+    color: var(--text);
+    font-size: 0.88rem;
+    text-decoration: none;
+    word-break: break-all;
+  }
+  .tunnel-copy-btn {
+    background: none;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 8px;
+    padding: 5px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 6px;
+    font-family: inherit;
+  }
+
+  /* --- Source toggle --- */
+  .source-toggle {
+    display: inline-flex;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px;
+    margin-bottom: 20px;
+  }
+  .source-toggle.disabled { opacity: 0.5; pointer-events: none; }
+  .toggle-btn {
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .toggle-btn.active {
+    background: var(--text);
+    color: var(--bg);
+  }
+  .toggle-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
 </style>
 </head>
 <body>
@@ -297,10 +375,20 @@
     <button class="gear-btn" id="gearBtn" aria-label="Settings" type="button">⚙︎</button>
   </header>
 
+  <div class="tunnel-banner" id="tunnelBanner">
+    <img id="tunnelQr" alt="QR code for the public MacPocket URL">
+    <div class="tunnel-text">
+      <strong>Public URL active</strong>
+      <a href="#" id="tunnelUrlLink" target="_blank" rel="noopener"></a>
+      <button class="tunnel-copy-btn" id="tunnelCopyBtn" type="button">Copy link</button>
+    </div>
+  </div>
+
   <div class="banner" id="insecureBanner">
     Your browser is blocking microphone access because this page isn't
     loaded over HTTPS (or localhost). See the README for how to enable
-    local HTTPS so you can record from your phone.
+    local HTTPS, or run <code>python run.py --tunnel</code> for a
+    zero-config public HTTPS URL.
   </div>
 
   <div class="settings" id="settings">
@@ -327,6 +415,10 @@
   </div>
 
   <div class="recorder" id="recorderView">
+    <div class="source-toggle" id="sourceToggle" role="group" aria-label="Audio source">
+      <button class="toggle-btn active" id="micToggleBtn" type="button" data-source="mic">🎙️ Mic</button>
+      <button class="toggle-btn" id="tabToggleBtn" type="button" data-source="tab">🖥️ Tab Audio</button>
+    </div>
     <div class="timer" id="timer">00:00</div>
     <canvas id="meter" width="320" height="56"></canvas>
     <button class="record-btn" id="recordBtn" type="button" aria-label="Start recording">
@@ -366,10 +458,17 @@
     gearBtn: document.getElementById("gearBtn"),
     settings: document.getElementById("settings"),
     insecureBanner: document.getElementById("insecureBanner"),
+    tunnelBanner: document.getElementById("tunnelBanner"),
+    tunnelQr: document.getElementById("tunnelQr"),
+    tunnelUrlLink: document.getElementById("tunnelUrlLink"),
+    tunnelCopyBtn: document.getElementById("tunnelCopyBtn"),
     recorderView: document.getElementById("recorderView"),
     processingView: document.getElementById("processingView"),
     processingText: document.getElementById("processingText"),
     resultsView: document.getElementById("resultsView"),
+    sourceToggle: document.getElementById("sourceToggle"),
+    micToggleBtn: document.getElementById("micToggleBtn"),
+    tabToggleBtn: document.getElementById("tabToggleBtn"),
     recordBtn: document.getElementById("recordBtn"),
     timer: document.getElementById("timer"),
     hint: document.getElementById("hint"),
@@ -393,6 +492,12 @@
   let timerInterval = null;
   let recordStartMs = 0;
   let isRecording = false;
+  let audioSource = "mic"; // "mic" | "tab"
+
+  const HINTS = {
+    mic: "Tap to start recording",
+    tab: "Tap to start, then pick a browser tab and check “Share tab audio”",
+  };
 
   const meterCtx = els.meter.getContext("2d");
 
@@ -424,6 +529,51 @@
     els.recordBtn.disabled = true;
     els.hint.textContent = "Microphone unavailable on this connection";
   }
+
+  // Tab Audio capture (getDisplayMedia) needs a secure context too, and
+  // isn't implemented at all on iOS Safari and most mobile browsers.
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia || !isSecure) {
+    els.tabToggleBtn.disabled = true;
+    els.tabToggleBtn.title = "Not supported in this browser";
+  }
+
+  function selectSource(source) {
+    if (isRecording) return;
+    audioSource = source;
+    els.micToggleBtn.classList.toggle("active", source === "mic");
+    els.tabToggleBtn.classList.toggle("active", source === "tab");
+    els.hint.textContent = HINTS[source];
+  }
+  els.micToggleBtn.addEventListener("click", function () { selectSource("mic"); });
+  els.tabToggleBtn.addEventListener("click", function () { selectSource("tab"); });
+
+  // If the server was started with `python run.py --tunnel`, show the
+  // public URL (and a QR code for it) so phones don't need the terminal.
+  async function loadTunnelInfo() {
+    try {
+      const res = await fetch("/tunnel-info");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data && data.url) {
+        els.tunnelUrlLink.textContent = data.url;
+        els.tunnelUrlLink.href = data.url;
+        els.tunnelQr.src = "https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=" +
+          encodeURIComponent(data.url);
+        els.tunnelBanner.classList.add("show");
+      }
+    } catch (err) {
+      // Tunnel info is a nicety, not critical -- fail silently.
+    }
+  }
+  els.tunnelCopyBtn.addEventListener("click", function () {
+    const url = els.tunnelUrlLink.href;
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(function () {
+      const original = els.tunnelCopyBtn.textContent;
+      els.tunnelCopyBtn.textContent = "Copied!";
+      setTimeout(function () { els.tunnelCopyBtn.textContent = original; }, 1500);
+    }).catch(function () {});
+  });
 
   function pickMimeType() {
     const candidates = [
@@ -481,13 +631,45 @@
 
   async function startRecording() {
     clearError();
+
+    let rawStream;
     try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (audioSource === "tab") {
+        // Tab/system audio capture: Chrome and Edge require video:true in
+        // the request even though we only want audio -- the video track is
+        // discarded immediately below. The user must check "Share tab
+        // audio" (or equivalent) in the browser's picker.
+        rawStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      } else {
+        rawStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
     } catch (err) {
-      showError("Couldn't access the microphone: " + err.message +
-        ". Check your browser's site permissions.");
+      const sourceLabel = audioSource === "tab" ? "tab audio" : "the microphone";
+      showError("Couldn't access " + sourceLabel + ": " + err.message +
+        ". Check your browser's permissions.");
       return;
     }
+
+    const audioTracks = rawStream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      rawStream.getTracks().forEach(function (t) { t.stop(); });
+      showError("No audio track was captured. When sharing a tab, make sure " +
+        "to check \"Share tab audio\" (or \"Share audio\") in the picker.");
+      return;
+    }
+
+    // We only need audio -- stop and discard any video track from
+    // getDisplayMedia so we're not holding a screen/tab capture open.
+    rawStream.getVideoTracks().forEach(function (t) { t.stop(); });
+    mediaStream = new MediaStream(audioTracks);
+
+    // If the user stops sharing via the browser's native "Stop sharing"
+    // bar, end the recording gracefully instead of leaving it hanging.
+    audioTracks[0].addEventListener("ended", function () {
+      if (isRecording) stopRecording();
+    });
+
+    els.sourceToggle.classList.add("disabled");
 
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const source = audioCtx.createMediaStreamSource(mediaStream);
@@ -526,6 +708,7 @@
   }
 
   function stopStream() {
+    els.sourceToggle.classList.remove("disabled");
     if (mediaStream) {
       mediaStream.getTracks().forEach(function (t) { t.stop(); });
       mediaStream = null;
@@ -651,12 +834,13 @@
 
   els.newRecordingBtn.addEventListener("click", function () {
     els.timer.textContent = "00:00";
-    els.hint.textContent = "Tap to start recording";
+    els.hint.textContent = HINTS[audioSource];
     clearError();
     setView("record");
   });
 
   setView("record");
+  loadTunnelInfo();
 })();
 </script>
 </body>

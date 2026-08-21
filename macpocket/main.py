@@ -11,6 +11,7 @@ Run with:  python run.py
 Or:        uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 """
 
+import json
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -31,6 +32,7 @@ from config import (
     NOTES_DIR,
     STATIC_DIR,
     SUMMARY_BACKENDS,
+    TUNNEL_INFO_FILE,
     UPLOAD_FOLDER,
     WHISPER_MODELS,
 )
@@ -57,6 +59,22 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(str(STATIC_DIR / "index.html"))
+
+
+@app.get("/tunnel-info")
+def tunnel_info() -> JSONResponse:
+    """
+    Reports the public tunnel URL when the server was started with
+    `python run.py --tunnel`, so the web UI can display it (and a QR
+    code) without the user needing to read the terminal.
+    """
+    if TUNNEL_INFO_FILE.is_file():
+        try:
+            data = json.loads(TUNNEL_INFO_FILE.read_text())
+            return JSONResponse({"url": data.get("url"), "provider": data.get("provider")})
+        except (json.JSONDecodeError, OSError):
+            pass
+    return JSONResponse({"url": None, "provider": None})
 
 
 def _ensure_dirs() -> None:

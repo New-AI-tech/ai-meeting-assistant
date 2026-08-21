@@ -8,8 +8,10 @@
 # - Creates a Python virtual environment in ./venv
 # - Installs Python dependencies from requirements.txt (FastAPI, uvicorn,
 #   python-multipart, pydub, whisper, ...)
-# - Optionally sets up a local HTTPS certificate (mkcert) so phones on your
-#   Wi-Fi can grant microphone access to the page
+# - Optionally installs cloudflared, for zero-config public HTTPS access
+#   via `python run.py --tunnel` (recommended -- no cert setup needed)
+# - Optionally sets up a local HTTPS certificate (mkcert) as an
+#   alternative, LAN-only way for phones to grant microphone access
 #
 # Windows users: this is a bash script and won't run natively. Install
 # Python 3.9+ and ffmpeg (e.g. `choco install ffmpeg` or `scoop install
@@ -17,6 +19,9 @@
 #   python -m venv venv
 #   venv\Scripts\activate
 #   pip install -r requirements.txt
+# For zero-config phone access, install cloudflared from:
+#   https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
+# then run: python run.py --tunnel
 #
 # Usage:
 #   chmod +x setup.sh
@@ -124,18 +129,38 @@ else
     warn "Alternatively, use '--backend openai' with an OPENAI_API_KEY set."
 fi
 
-# --- 7. Optional: local HTTPS for phone access (mkcert) --------------------
+# --- 7. cloudflared (optional, for zero-config public HTTPS) ---------------
 #
-# Phones (especially iOS Safari) block microphone access on pages loaded
-# over plain HTTP unless the host is "localhost". To record from a phone
-# on your Wi-Fi, the server needs a real HTTPS certificate for its local
-# IP -- mkcert generates one that's automatically trusted on this Mac.
+# `python run.py --tunnel` uses cloudflared to get a public HTTPS URL with
+# no account, signup, or certificate setup -- the easiest way for phones
+# (including iOS Safari) to get microphone access to the page.
+
+if command -v cloudflared >/dev/null 2>&1; then
+    info "cloudflared is already installed -- 'python run.py --tunnel' is ready to use."
+else
+    echo
+    read -r -p "Install cloudflared now, for zero-config phone access via 'python run.py --tunnel'? [y/N] " reply
+    if [[ "$reply" =~ ^[Yy]$ ]]; then
+        info "Installing cloudflared..."
+        brew install cloudflared || warn "cloudflared install failed -- you can retry with: brew install cloudflared"
+    else
+        info "Skipping cloudflared. You can install it later with: brew install cloudflared"
+    fi
+fi
+
+# --- 8. Optional: local HTTPS for phone access (mkcert) ---------------------
+#
+# Alternative to --tunnel: phones (especially iOS Safari) block microphone
+# access on pages loaded over plain HTTP unless the host is "localhost".
+# To record from a phone on your Wi-Fi without a public tunnel, the server
+# needs a real HTTPS certificate for its local IP -- mkcert generates one
+# that's automatically trusted on this Mac.
 
 if [[ -f "certs/cert.pem" && -f "certs/key.pem" ]]; then
     info "Local HTTPS certificate already exists in ./certs."
 else
     echo
-    read -r -p "Set up local HTTPS now so phones can use the microphone? [y/N] " reply
+    read -r -p "Also set up local (LAN-only) HTTPS with mkcert? [y/N] " reply
     if [[ "$reply" =~ ^[Yy]$ ]]; then
         if ! command -v mkcert >/dev/null 2>&1; then
             info "Installing mkcert..."
@@ -162,9 +187,9 @@ info "Setup complete!"
 echo
 echo "To get started:"
 echo "  1. source venv/bin/activate"
-echo "  2. python run.py"
-echo "  3. Open the printed URL on this computer, or from your phone on the"
-echo "     same Wi-Fi using this Mac's local IP (see README.md)."
+echo "  2. python run.py --tunnel   (or just 'python run.py' for local-only)"
+echo "  3. Open the printed URL on any device -- or scan the QR code shown"
+echo "     in the web UI (see README.md)."
 echo
 echo "See README.md for how to set up a Multi-Output Device so you can"
 echo "capture system audio (e.g. Zoom/Meet calls) while still hearing them,"

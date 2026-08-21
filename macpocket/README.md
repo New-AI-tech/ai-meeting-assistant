@@ -12,8 +12,10 @@ explicitly choose the `openai` summarization backend.
 
 ## Features
 
-- 🌐 **Cross-platform web app** — one server, any browser, any device on your Wi-Fi
-- 🎙️ Record straight from the browser's microphone (no app install, no BlackHole needed for this flow)
+- 🌐 **Cross-platform web app** — one server, any browser, any device, anywhere with `--tunnel`
+- 🔒 **Zero-config public HTTPS** via `python run.py --tunnel` (cloudflared) — no certificates, no account, works on iOS Safari
+- 🎙️ Record straight from the browser's microphone
+- 🖥️ **Tab Audio capture** on desktop Chrome/Edge — record a Zoom/Meet tab's audio without installing anything
 - 📝 Local, offline transcription with Whisper
 - 🤖 Summarization + action items via local LLM (Ollama/llama3.2) or OpenAI (gpt-4o-mini)
 - 💾 Notes saved as timestamped `.txt` files on the server, in `~/MacPocket/Notes/`
@@ -58,7 +60,8 @@ chmod +x setup.sh
 3. Install BlackHole 2ch (optional — only used by the CLI fallback for system-audio capture).
 4. Create a virtual environment (`./venv`) and install everything in `requirements.txt` (FastAPI, uvicorn, python-multipart, pydub, Whisper, ...).
 5. Check for Ollama and tell you how to pull the `llama3.2` model.
-6. **Optionally set up local HTTPS** with [mkcert](https://github.com/FiloSottile/mkcert) — see [Recording from a phone](#recording-from-a-phone-https) below for why this matters.
+6. **Optionally install [cloudflared](https://github.com/cloudflare/cloudflared)** — powers `python run.py --tunnel`, the recommended zero-config way to get a public HTTPS URL for phone access.
+7. **Optionally set up local HTTPS** with [mkcert](https://github.com/FiloSottile/mkcert) as a LAN-only alternative to `--tunnel` — see [Recording from a phone](#recording-from-a-phone) below.
 
 ### Windows
 
@@ -85,19 +88,43 @@ installs automatically with the command above.
 
 ```bash
 source venv/bin/activate      # Windows: venv\Scripts\activate
+python run.py --tunnel
+```
+
+This starts the FastAPI server on port `8000` **and** opens a public
+HTTPS URL via cloudflared — printed in the terminal in a box, and shown
+in the web UI as a banner with a scannable QR code. Open that URL on
+*any* device with internet access, no Wi-Fi requirement, no certificate
+setup. This is the recommended way to get microphone access working on
+a phone with zero configuration.
+
+Prefer to stay LAN-only (no public URL at all)? Drop the flag:
+
+```bash
 python run.py
 ```
 
-This starts the FastAPI server on port `8000`. Equivalent manual command:
+Equivalent manual command for either mode:
 
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Open **http://localhost:8000** in a browser on the same computer to try
-it immediately.
+it immediately, regardless of which mode you used.
 
 ## Connecting from your phone or another device
+
+### Recommended: `python run.py --tunnel`
+
+The printed URL (`https://<random-words>.trycloudflare.com`) works from
+any device with internet access — scan the QR code shown in the web UI,
+or open the URL directly. This is a secure HTTPS origin, so microphone
+access just works, including on iOS Safari. No account or signup is
+needed for cloudflared's "quick tunnel" mode. The URL changes each time
+you restart the server, and stops working when you stop it (`Ctrl+C`).
+
+### Alternative: stay on your local network
 
 1. **Find this computer's local IP address:**
 
@@ -132,10 +159,11 @@ context** — HTTPS, or the special case of `localhost`. Your phone
 connecting to `http://192.168.x.x:8000` is *not* a secure context, so
 **iOS Safari and most browsers will silently block the microphone** on
 that URL. The MacPocket page detects this and shows a banner explaining
-why the record button is disabled.
+why the record button is disabled. `python run.py --tunnel` (above)
+sidesteps this entirely; the options below are for staying LAN-only.
 
-To fix it, give the server a real (locally-trusted) HTTPS certificate
-with [mkcert](https://github.com/FiloSottile/mkcert):
+Give the server a real (locally-trusted) HTTPS certificate with
+[mkcert](https://github.com/FiloSottile/mkcert):
 
 ```bash
 brew install mkcert nss   # nss needed if you use Firefox
@@ -145,31 +173,48 @@ mkcert -cert-file certs/cert.pem -key-file certs/key.pem localhost 127.0.0.1 <yo
 ```
 
 `setup.sh` offers to do this for you automatically. Once `certs/cert.pem`
-and `certs/key.pem` exist, `python run.py` automatically serves over
-HTTPS — connect to `https://<your-local-ip>:8000` from your phone
-instead. Because the certificate is only trusted by mkcert's local
-root CA, your phone will need that CA trusted too (mkcert prints
-instructions for this — usually installing a profile on iOS, or a
-similar step on Android) or you'll see a certificate warning you can
-click through for local testing.
-
-If you'd rather not deal with certificates, tools like
-[`ngrok`](https://ngrok.com) or [`cloudflared`](https://github.com/cloudflare/cloudflared)
-can tunnel `localhost:8000` to a temporary public HTTPS URL, which sidesteps
-this entirely (at the cost of your recording briefly leaving your LAN in
-transit).
+and `certs/key.pem` exist, `python run.py` (without `--tunnel`)
+automatically serves over HTTPS — connect to
+`https://<your-local-ip>:8000` from your phone instead. Because the
+certificate is only trusted by mkcert's local root CA, your phone will
+need that CA trusted too (mkcert prints instructions for this — usually
+installing a profile on iOS, or a similar step on Android) or you'll see
+a certificate warning you can click through for local testing. Note:
+`--tunnel` and local certs are mutually exclusive — when tunneling, the
+local server always runs plain HTTP and any `./certs` are ignored, since
+cloudflared already provides HTTPS.
 
 ## Using the web app
 
 1. Open the page (see above).
-2. Tap the gear icon to choose a Whisper model size, summarization
+2. Choose **🎙️ Mic** or **🖥️ Tab Audio** as your source (see below).
+3. Tap the gear icon to choose a Whisper model size, summarization
    backend, and an optional meeting title.
-3. Tap the big red button to start recording — you'll see a live volume
+4. Tap the big red button to start recording — you'll see a live volume
    meter and timer.
-4. Tap it again to stop. The recording uploads automatically and
+5. Tap it again to stop. The recording uploads automatically and
    MacPocket transcribes and summarizes it.
-5. Read the summary, action items, and full transcript on the results
+6. Read the summary, action items, and full transcript on the results
    screen. The note is also saved to `~/MacPocket/Notes/` on the server.
+
+## Tab Audio capture (system/meeting audio)
+
+Desktop Chrome and Edge can capture a browser tab's audio directly — no
+BlackHole or virtual audio driver needed. Select **🖥️ Tab Audio**, hit
+record, and in the picker choose the tab playing your Zoom/Meet call
+(or any audio), making sure to check **"Share tab audio"** (Chrome) or
+**"Share audio"** (Edge) — it's easy to miss and unchecked means no
+audio track gets captured, which MacPocket detects and reports as an
+error asking you to retry with that box checked.
+
+Browser support is uneven: this uses `getDisplayMedia`, which desktop
+Chrome/Edge support well, Firefox partially supports (screen/window
+audio, not always tab audio), and **iOS Safari and most mobile browsers
+don't support at all** — the Tab Audio button is automatically disabled
+on unsupported browsers. For system audio capture on unsupported
+browsers, or to capture your Mac's system output more broadly than one
+tab, use [the CLI with BlackHole](#capturing-system-audio-cli-only)
+instead.
 
 ## API reference
 
@@ -206,6 +251,17 @@ Reserved for future live-streaming transcription. Not used by the
 current frontend, which uploads a complete clip after recording stops;
 today it just accepts the connection and closes with an explanatory
 message.
+
+### `GET /tunnel-info`
+
+Returns the active public tunnel URL when the server was started with
+`--tunnel`, so the web UI can show it without reading the terminal:
+
+```json
+{"url": "https://random-words.trycloudflare.com", "provider": "cloudflared"}
+```
+
+Returns `{"url": null, "provider": null}` when no tunnel is active.
 
 ## The CLI fallback
 
@@ -296,12 +352,32 @@ the load-time cost.
 ## Troubleshooting
 
 **Record button is disabled / grey**
-You're on a non-HTTPS, non-localhost page — see
-[Recording from a phone](#recording-from-a-phone-https) above.
+You're on a non-HTTPS, non-localhost page — run with `--tunnel` for the
+easiest fix, or see [Recording from a phone](#recording-from-a-phone-https) above.
 
 **"Couldn't access the microphone" error**
 Check your browser's site permissions for the page and allow microphone
 access.
+
+**"No audio track was captured" (Tab Audio)**
+You picked a tab/window/screen in the share picker but didn't check
+"Share tab audio" / "Share audio" — try again and make sure it's
+checked. Some sources (e.g. sharing "Entire Screen" on macOS) don't
+offer audio at all; pick a specific Chrome tab instead.
+
+**Tab Audio button is disabled**
+Your browser doesn't support `getDisplayMedia` audio capture (common on
+iOS Safari and most mobile browsers) or the page isn't a secure
+context. Use **🎙️ Mic** instead, or the CLI + BlackHole for system audio.
+
+**`--tunnel` fails with "cloudflared isn't installed"**
+Run `brew install cloudflared` (or see the printed download link), then
+retry. Alternatively `pip install pyngrok` as a fallback (requires a
+free ngrok account + authtoken).
+
+**`--tunnel` times out waiting for a URL**
+Check your internet connection. cloudflared needs to reach Cloudflare's
+network to establish the quick tunnel.
 
 **"Could not decode the uploaded audio"**
 ffmpeg isn't installed (or isn't on `PATH`) on the machine running the
@@ -311,10 +387,11 @@ server. Re-run `setup.sh`, or install ffmpeg manually.
 Make sure the Ollama app/daemon is running and you've pulled the model:
 `ollama pull llama3.2`.
 
-**Phone can't reach the server at all**
+**Phone can't reach the server at all (LAN mode)**
 Confirm both devices are on the same Wi-Fi network (not a guest network
 that isolates clients from each other), and that no firewall is blocking
-port 8000 on the server machine.
+port 8000 on the server machine. Or just use `--tunnel`, which doesn't
+depend on Wi-Fi/firewall configuration at all.
 
 **Whisper is slow**
 Try a smaller model (`tiny` or `base`) in the settings panel.
@@ -323,16 +400,17 @@ Try a smaller model (`tiny` or `base`) in the settings panel.
 
 ```
 macpocket/
-├── main.py            # FastAPI app: serves the web UI, POST /upload-audio, /ws
-├── run.py              # Launches uvicorn (with HTTPS if certs/ exists)
-├── cli.py               # Terminal CLI fallback (record/transcribe/summarize)
-├── recorder.py           # Audio capture (sounddevice) used by cli.py
-├── transcriber.py         # Local Whisper transcription (array- and file-based)
-├── summarizer.py           # Ollama / OpenAI summarization backends
-├── config.py                 # Defaults, paths, prompt template, constants
+├── main.py            # FastAPI app: serves the web UI, POST /upload-audio, /tunnel-info, /ws
+├── run.py              # Launches uvicorn; --tunnel for cloudflared, or HTTPS if certs/ exists
+├── tunnel.py            # cloudflared/pyngrok wrapper used by run.py --tunnel
+├── cli.py                # Terminal CLI fallback (record/transcribe/summarize)
+├── recorder.py             # Audio capture (sounddevice) used by cli.py
+├── transcriber.py           # Local Whisper transcription (array- and file-based)
+├── summarizer.py              # Ollama / OpenAI summarization backends
+├── config.py                    # Defaults, paths, prompt template, constants
 ├── static/
-│   └── index.html              # Mobile-first web UI (HTML/CSS/JS, no build step)
-├── certs/                        # (optional, gitignored) local HTTPS cert/key
+│   └── index.html                  # Mobile-first web UI: Mic/Tab Audio toggle, tunnel banner, results
+├── certs/                            # (optional, gitignored) local HTTPS cert/key
 ├── requirements.txt
 ├── setup.sh
 └── README.md
@@ -348,3 +426,9 @@ macpocket/
   machine. Nothing is uploaded or synced anywhere by MacPocket itself.
 - Recordings are converted and transcribed in a temporary upload folder
   (`~/MacPocket/uploads/`) and deleted immediately after processing.
+- With `--tunnel`, cloudflared routes traffic between your device and
+  this server through Cloudflare's network (this is how it gets you a
+  public HTTPS URL without port-forwarding or a domain). The audio and
+  transcript payloads pass through in transit but are not stored by
+  MacPocket anywhere but your machine. If that's a concern, stay on the
+  LAN-only mkcert flow instead — it never leaves your Wi-Fi.

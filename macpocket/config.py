@@ -19,6 +19,11 @@ STATIC_DIR = Path(__file__).parent / "static"
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 8000
 
+# Written by run.py --tunnel with the active public tunnel URL, and read by
+# GET /tunnel-info so the web UI can display/QR-code it. Removed when the
+# tunnel shuts down.
+TUNNEL_INFO_FILE = Path(os.path.expanduser("~/MacPocket/tunnel_url.json"))
+
 # --- Audio ---------------------------------------------------------------
 
 SAMPLE_RATE = 16000  # Hz — matches what Whisper expects internally
