@@ -12,6 +12,7 @@ Or:        uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 """
 
 import json
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -187,6 +188,11 @@ async def upload_audio(
             summary = f"(Summary unavailable: {exc})"
 
         note_title = title.strip() or DEFAULT_MEETING_TITLE
+
+        # Belt-and-suspenders: _ensure_dirs() already created this above, but
+        # create it again right before the write so a note is never lost to
+        # a directory that got removed/never existed in between.
+        os.makedirs(NOTES_DIR, exist_ok=True)
         note_path = _write_note(note_title, transcript, summary)
 
         return JSONResponse(
@@ -196,6 +202,18 @@ async def upload_audio(
                 "note_path": str(note_path),
             }
         )
+    except HTTPException:
+        # Already a deliberate, descriptive error (bad backend/model, empty
+        # upload, undecodable audio, ...) -- pass it through unchanged.
+        raise
+    except Exception as exc:
+        # Anything unexpected (e.g. a permissions/filesystem error on the
+        # cloud host) should still tell the caller what actually broke,
+        # instead of an opaque 500 with no body.
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected error ({type(exc).__name__}): {exc}",
+        ) from exc
     finally:
         raw_path.unlink(missing_ok=True)
         wav_path.unlink(missing_ok=True)

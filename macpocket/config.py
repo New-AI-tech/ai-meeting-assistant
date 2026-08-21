@@ -3,12 +3,20 @@ config.py — MacPocket default settings and constants.
 """
 
 import os
+import tempfile
 from pathlib import Path
 
 # --- Paths -------------------------------------------------------------
 
 NOTES_DIR = Path(os.path.expanduser("~/MacPocket/Notes"))
-UPLOAD_FOLDER = Path(os.path.expanduser("~/MacPocket/uploads"))
+
+# Scratch space for in-flight uploads (raw browser recording + converted
+# wav), deleted immediately after each request. Based on tempfile.gettempdir()
+# rather than ~/MacPocket/uploads so it's guaranteed writable on Linux cloud
+# instances/containers, where $HOME may be unset or read-only even if the
+# rest of the filesystem is fine.
+UPLOAD_FOLDER = Path(tempfile.gettempdir()) / "macpocket-uploads"
+
 FILENAME_TIMESTAMP_FMT = "%Y-%m-%d_%H-%M-%S"
 FILENAME_PREFIX = "Meeting_"
 
