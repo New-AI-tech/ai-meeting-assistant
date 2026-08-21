@@ -288,6 +288,15 @@
   }
   .error-banner.show { display: block; }
 
+  .app-footer {
+    text-align: center;
+    color: var(--text-muted);
+    opacity: 0.6;
+    font-size: 0.75rem;
+    padding: 24px 20px calc(16px + env(safe-area-inset-bottom));
+    margin-top: auto;
+  }
+
   /* --- Tunnel banner --- */
   .tunnel-banner {
     display: none;
@@ -448,6 +457,10 @@
   </div>
 
   <div class="error-banner" id="errorBanner"></div>
+
+  <footer class="app-footer">
+    Deployed by Ahmed Backer &mdash; Atlantis Holidays &amp; Wellness, Dubai. 2026
+  </footer>
 </div>
 
 <script>
