@@ -1,0 +1,7 @@
+# FastAPI Cloud's buildpack looks for requirements.txt at the repo root
+# (same place as Aptfile and fastapi_cloud.json). The actual dependency
+# list lives in macpocket/requirements.txt, alongside the app code and
+# setup.sh, which is the single source of truth -- this just points to
+# it so both the local `./setup.sh` flow and the cloud build install the
+# same versions.
+-r macpocket/requirements.txt
