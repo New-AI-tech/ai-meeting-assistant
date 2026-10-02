@@ -75,19 +75,28 @@ nothing else:
 - <bullet 2>
 - <bullet 3>
 
+## Breaking Points & Discussion
+- <breaking/key point 1>
+- <breaking/key point 2>
+
+## Important Points
+- <important point 1>
+- <important point 2>
+
 ## Action Items
 - [ ] <action item 1> (Owner: <name or "Unassigned">)
 - [ ] <action item 2> (Owner: <name or "Unassigned">)
 - [ ] <action item 3> (Owner: <name or "Unassigned">)
 
 Rules:
-- The summary must be EXACTLY 3 bullet points capturing the most important \
-points of the meeting.
-- Action items must be formatted as a markdown checkbox list.
+- The summary must be EXACTLY 3 bullet points capturing the high-level overview of the meeting.
+- The "Breaking Points & Discussion" section must list key turning points, debate topics, decisions made, or major shifts in conversation.
+- The "Important Points" section must list key takeaways, technical or business facts, dates, numbers, or critical context mentioned.
+- Action items (To-Do List) must be formatted as a markdown checkbox list.
 - Infer the most likely owner for each action item from context (who \
 volunteered, who was addressed, who is responsible for that area). If no \
 owner can be reasonably inferred, use "Unassigned".
-- If there truly are no action items, write a single line: \
+- If there truly are no action items, write a single line under Action Items: \
 "- [ ] No action items identified"
 - Do not include any text before "## Summary" or after the last action item.
 
