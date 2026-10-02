@@ -83,47 +83,74 @@ def _ensure_dirs() -> None:
     NOTES_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _get_ffmpeg_exe() -> str | None:
+    """Locate an ffmpeg binary either in system PATH or via imageio_ffmpeg."""
+    import shutil
+    sys_ffmpeg = shutil.which("ffmpeg")
+    if sys_ffmpeg:
+        return sys_ffmpeg
+
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
+
 def _convert_to_wav(src_path: Path, dst_path: Path) -> None:
     """Normalize whatever format the browser recorded (webm/opus, mp4/aac,
-    ogg, ...) into a mono 16kHz WAV file using pydub or directly via ffmpeg subprocess.
+    ogg, ...) into a mono 16kHz WAV file using pydub, imageio_ffmpeg, or ffmpeg subprocess.
     """
+    ffmpeg_exe = _get_ffmpeg_exe()
+
+    # Try converting via pydub if installed
     try:
         from pydub import AudioSegment
+        if ffmpeg_exe:
+            AudioSegment.converter = ffmpeg_exe
+
         audio = AudioSegment.from_file(src_path)
         audio = audio.set_channels(1).set_frame_rate(16000)
         audio.export(dst_path, format="wav")
         return
     except ImportError:
-        # Fall back to direct ffmpeg subprocess if pydub is not installed
         pass
     except Exception:
-        # If pydub fails to decode, attempt ffmpeg directly below before giving up
         pass
 
-    import subprocess
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", str(src_path),
-        "-ac", "1",
-        "-ar", "16000",
-        str(dst_path)
-    ]
-    try:
+    # Try converting via ffmpeg subprocess executable (system or imageio-ffmpeg static binary)
+    if ffmpeg_exe:
+        import subprocess
+        cmd = [
+            ffmpeg_exe, "-y",
+            "-i", str(src_path),
+            "-ac", "1",
+            "-ar", "16000",
+            str(dst_path)
+        ]
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if res.returncode != 0:
-            err_msg = res.stderr.decode("utf-8", errors="replace")
-            raise HTTPException(
-                status_code=400,
-                detail=f"Could not decode the uploaded audio with ffmpeg: {err_msg}",
-            )
-    except FileNotFoundError:
+        if res.returncode == 0:
+            return
+        err_msg = res.stderr.decode("utf-8", errors="replace")
         raise HTTPException(
-            status_code=500,
-            detail=(
-                "Neither pydub nor ffmpeg is available on the server. "
-                "Please install pydub (pip install pydub) or ffmpeg."
-            ),
+            status_code=400,
+            detail=f"Could not decode uploaded audio with ffmpeg: {err_msg}",
         )
+
+    # Fallback: if the uploaded file is already a .wav file and no converter is available
+    if src_path.suffix.lower() == ".wav":
+        import shutil
+        shutil.copyfile(src_path, dst_path)
+        return
+
+    raise HTTPException(
+        status_code=500,
+        detail=(
+            "Neither pydub nor ffmpeg executable (imageio-ffmpeg or system ffmpeg) "
+            "is available on the server to process audio. Please install imageio-ffmpeg "
+            "(pip install imageio-ffmpeg) or ffmpeg."
+        ),
+    )
 
 
 def _write_note(title: str, transcript: str, summary: str) -> Path:
