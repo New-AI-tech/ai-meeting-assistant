@@ -13,7 +13,25 @@ class TranscriptionError(Exception):
     """Raised when transcription cannot proceed."""
 
 
+def _ensure_ffmpeg_on_path():
+    """Ensure ffmpeg binary is discoverable in PATH, using imageio_ffmpeg if needed."""
+    import os
+    import shutil
+    if not shutil.which("ffmpeg"):
+        try:
+            import imageio_ffmpeg
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            if ffmpeg_exe:
+                ffmpeg_dir = str(Path(ffmpeg_exe).parent)
+                current_path = os.environ.get("PATH", "")
+                if ffmpeg_dir not in current_path:
+                    os.environ["PATH"] = f"{ffmpeg_dir}{os.pathsep}{current_path}"
+        except Exception:
+            pass
+
+
 def _load_whisper():
+    _ensure_ffmpeg_on_path()
     try:
         import whisper
     except ImportError as exc:

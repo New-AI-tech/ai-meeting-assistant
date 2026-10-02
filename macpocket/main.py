@@ -84,7 +84,7 @@ def _ensure_dirs() -> None:
 
 
 def _get_ffmpeg_exe() -> str | None:
-    """Locate an ffmpeg binary either in system PATH or via imageio_ffmpeg."""
+    """Locate an ffmpeg binary either in system PATH or via imageio_ffmpeg, adding to PATH if needed."""
     import shutil
     sys_ffmpeg = shutil.which("ffmpeg")
     if sys_ffmpeg:
@@ -92,9 +92,16 @@ def _get_ffmpeg_exe() -> str | None:
 
     try:
         import imageio_ffmpeg
-        return imageio_ffmpeg.get_ffmpeg_exe()
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if ffmpeg_exe:
+            ffmpeg_dir = str(Path(ffmpeg_exe).parent)
+            current_path = os.environ.get("PATH", "")
+            if ffmpeg_dir not in current_path:
+                os.environ["PATH"] = f"{ffmpeg_dir}{os.pathsep}{current_path}"
+            return ffmpeg_exe
     except Exception:
-        return None
+        pass
+    return None
 
 
 def _convert_to_wav(src_path: Path, dst_path: Path) -> None:
@@ -153,22 +160,27 @@ def _convert_to_wav(src_path: Path, dst_path: Path) -> None:
     )
 
 
-def _write_note(title: str, transcript: str, summary: str) -> Path:
-    timestamp = datetime.now().strftime(FILENAME_TIMESTAMP_FMT)
-    note_path = NOTES_DIR / f"{FILENAME_PREFIX}{timestamp}.txt"
-    content = (
-        f"Title: {title}\n"
-        f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"{'=' * 60}\n\n"
-        f"TRANSCRIPT\n"
-        f"{'-' * 60}\n"
-        f"{transcript.strip()}\n\n"
-        f"SUMMARY & ACTION ITEMS\n"
-        f"{'-' * 60}\n"
-        f"{summary.strip()}\n"
-    )
-    note_path.write_text(content, encoding="utf-8")
-    return note_path
+def _write_note(title: str, transcript: str, summary: str) -> Path | None:
+    try:
+        os.makedirs(NOTES_DIR, exist_ok=True)
+        timestamp = datetime.now().strftime(FILENAME_TIMESTAMP_FMT)
+        note_path = NOTES_DIR / f"{FILENAME_PREFIX}{timestamp}.txt"
+        content = (
+            f"Title: {title}\n"
+            f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"{'=' * 60}\n\n"
+            f"TRANSCRIPT\n"
+            f"{'-' * 60}\n"
+            f"{transcript.strip()}\n\n"
+            f"SUMMARY & ACTION ITEMS\n"
+            f"{'-' * 60}\n"
+            f"{summary.strip()}\n"
+        )
+        note_path.write_text(content, encoding="utf-8")
+        return note_path
+    except Exception as exc:
+        print(f"[MacPocket] Warning: Could not save note file to disk: {exc}")
+        return None
 
 
 @app.post("/upload-audio")
@@ -226,17 +238,13 @@ async def upload_audio(
 
         note_title = title.strip() or DEFAULT_MEETING_TITLE
 
-        # Belt-and-suspenders: _ensure_dirs() already created this above, but
-        # create it again right before the write so a note is never lost to
-        # a directory that got removed/never existed in between.
-        os.makedirs(NOTES_DIR, exist_ok=True)
         note_path = _write_note(note_title, transcript, summary)
 
         return JSONResponse(
             {
                 "transcript": transcript,
                 "summary": summary,
-                "note_path": str(note_path),
+                "note_path": str(note_path) if note_path else None,
             }
         )
     except HTTPException:
