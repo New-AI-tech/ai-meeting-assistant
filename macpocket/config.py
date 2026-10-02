@@ -46,7 +46,7 @@ BLACKHOLE_INSTALL_CMD = "brew install blackhole-2ch"
 # --- Transcription ---------------------------------------------------------
 
 WHISPER_MODELS = ("tiny", "base", "small", "medium", "large")
-DEFAULT_WHISPER_MODEL = "base"
+DEFAULT_WHISPER_MODEL = "tiny"
 
 # Apple Silicon (M1/M2/M3) users may set this to True (or pass --fp16) for
 # faster transcription. Intel Macs should leave this False to avoid
