@@ -4,7 +4,13 @@ transcriber.py — Local transcription using OpenAI's Whisper model.
 
 from pathlib import Path
 
+import os
 import numpy as np
+
+# Set thread limits to prevent PyTorch from hanging or crashing serverless workers
+os.environ.setdefault("TORCH_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
 
 from config import DEFAULT_FP16, DEFAULT_WHISPER_MODEL, SAMPLE_RATE, WHISPER_MODELS
 
@@ -143,6 +149,21 @@ def transcribe_file(
     try:
         result = model.transcribe(str(path), fp16=fp16, verbose=False)
     except Exception as exc:
+        # If whisper fails (e.g. timeout, memory or torch error), check if OPENAI_API_KEY is available for API fallback
+        openai_key = os.environ.get("OPENAI_API_KEY")
+        if openai_key:
+            print(f"[MacPocket] Local Whisper failed ({exc}). Falling back to OpenAI Whisper API...")
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=openai_key)
+                with open(str(path), "rb") as audio_file:
+                    res = client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=audio_file
+                    )
+                return res.text.strip()
+            except Exception as api_exc:
+                raise TranscriptionError(f"[MacPocket] Whisper transcription & API fallback failed: {api_exc}") from api_exc
         raise TranscriptionError(f"[MacPocket] Whisper transcription failed: {exc}") from exc
 
     text = result.get("text", "").strip()
