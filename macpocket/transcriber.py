@@ -2,17 +2,29 @@
 transcriber.py — Local transcription using OpenAI's Whisper model.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import os
-import numpy as np
+
+if TYPE_CHECKING:
+    import numpy as np
 
 # Set thread limits to prevent PyTorch from hanging or crashing serverless workers
 os.environ.setdefault("TORCH_NUM_THREADS", "1")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 
-from config import DEFAULT_FP16, DEFAULT_WHISPER_MODEL, SAMPLE_RATE, WHISPER_MODELS
+from config import (
+    DEFAULT_FP16,
+    DEFAULT_WHISPER_MODEL,
+    SAMPLE_RATE,
+    TRANSCRIPTION_BACKEND,
+    TRANSCRIPTION_BACKENDS,
+    WHISPER_MODELS,
+)
 
 
 class TranscriptionError(Exception):
@@ -101,6 +113,8 @@ def transcribe_audio(
     Transcribe a mono float32 numpy array of audio samples using a local
     Whisper model. Returns the transcript text.
     """
+    import numpy as np
+
     if audio.size == 0:
         raise TranscriptionError(
             "No audio was recorded, so there is nothing to transcribe."
@@ -141,6 +155,26 @@ def transcribe_file(
             "nothing to transcribe."
         )
 
+    backend = TRANSCRIPTION_BACKEND
+    if backend not in TRANSCRIPTION_BACKENDS:
+        raise TranscriptionError(
+            f"Unknown transcription backend '{backend}'. Choose from: "
+            f"{', '.join(TRANSCRIPTION_BACKENDS)}"
+        )
+
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    # Hosted workers are a poor fit for loading and running local Whisper:
+    # the model download and inference happen inside the request and can cause
+    # the platform proxy to return 502 before FastAPI can send a response.
+    # In auto mode, use the transcription API whenever it is configured. A
+    # keyless local installation continues to use local Whisper as before.
+    if backend == "openai" or (backend == "auto" and openai_key):
+        if not openai_key:
+            raise TranscriptionError(
+                "OPENAI_API_KEY is required when TRANSCRIPTION_BACKEND=openai."
+            )
+        return _transcribe_file_openai(path, openai_key)
+
     model = _get_model(model_size)
 
     print("[MacPocket] Transcribing audio locally with Whisper "
@@ -149,21 +183,10 @@ def transcribe_file(
     try:
         result = model.transcribe(str(path), fp16=fp16, verbose=False)
     except Exception as exc:
-        # If whisper fails (e.g. timeout, memory or torch error), check if OPENAI_API_KEY is available for API fallback
-        openai_key = os.environ.get("OPENAI_API_KEY")
+        # Explicit local mode retains the API fallback for compatibility.
         if openai_key:
             print(f"[MacPocket] Local Whisper failed ({exc}). Falling back to OpenAI Whisper API...")
-            try:
-                from openai import OpenAI
-                client = OpenAI(api_key=openai_key)
-                with open(str(path), "rb") as audio_file:
-                    res = client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=audio_file
-                    )
-                return res.text.strip()
-            except Exception as api_exc:
-                raise TranscriptionError(f"[MacPocket] Whisper transcription & API fallback failed: {api_exc}") from api_exc
+            return _transcribe_file_openai(path, openai_key)
         raise TranscriptionError(f"[MacPocket] Whisper transcription failed: {exc}") from exc
 
     text = result.get("text", "").strip()
@@ -171,8 +194,32 @@ def transcribe_file(
     return text
 
 
+def _transcribe_file_openai(path: Path, api_key: str) -> str:
+    """Transcribe *path* without initializing the heavyweight local model."""
+    print("[MacPocket] Transcribing audio with the OpenAI transcription API...")
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        with path.open("rb") as audio_file:
+            response = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+            )
+    except Exception as exc:
+        raise TranscriptionError(
+            f"[MacPocket] OpenAI transcription failed: {exc}"
+        ) from exc
+
+    text = response.text.strip()
+    print("[MacPocket] Transcription complete.")
+    return text
+
+
 def _ensure_16k_mono(audio: np.ndarray, sample_rate: int) -> np.ndarray:
     """Whisper is trained on 16kHz audio; resample if our capture rate differs."""
+    import numpy as np
+
     if sample_rate == 16000:
         return audio.astype(np.float32)
 

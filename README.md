@@ -61,9 +61,6 @@ macpocket/
 ## Privacy
 
 - Audio and transcripts stay on your Mac at all times when using the
-  default `local` backend.
-- The `openai` backend sends only the **transcript text** (not audio) to
-  OpenAI's API for summarization.
   default local transcription and summarization backends.
 - Selecting OpenAI only as the summarizer sends the **transcript text** (not
   audio) to OpenAI. The resource-safe `macpocket.cloud` deployment entry point
