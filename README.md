@@ -222,6 +222,15 @@ python main.py --model small --fp16
 
 ## Troubleshooting
 
+**Hosted `/upload-audio` requests return 502**
+Cloud workers can time out or run out of memory while downloading and running
+the local Whisper model. The checked-in FastAPI Cloud and Procfile entry points
+use `macpocket.cloud`, which selects API transcription without installing the
+large local audio/ML dependency stack. Configure `OPENAI_API_KEY` in the
+deployment and redeploy. Local installs continue to use `macpocket.main` and
+run Whisper on-device. You can override either choice with
+`TRANSCRIPTION_BACKEND=local`, `auto`, or `openai`.
+
 **"No input devices found" / microphone not detected**
 Check **System Settings → Privacy & Security → Microphone** and make
 sure Terminal (or whichever app you're running Python from) has
@@ -256,8 +265,11 @@ macpocket/
 ## Privacy
 
 - Audio and transcripts stay on your Mac at all times when using the
-  default `local` backend.
-- The `openai` backend sends only the **transcript text** (not audio) to
-  OpenAI's API for summarization.
+  default local transcription and summarization backends.
+- Selecting OpenAI only as the summarizer sends the **transcript text** (not
+  audio) to OpenAI. The resource-safe `macpocket.cloud` deployment entry point
+  uses OpenAI transcription and therefore sends uploaded audio to OpenAI as
+  well. Set `TRANSCRIPTION_BACKEND=local` only on a host provisioned to run
+  local Whisper.
 - Notes are stored locally in `~/MacPocket/Notes/`. Nothing is uploaded
   or synced anywhere by MacPocket itself.
