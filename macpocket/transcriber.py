@@ -67,9 +67,19 @@ def _get_model(model_size: str):
     try:
         model = whisper.load_model(model_size)
     except Exception as exc:
-        raise TranscriptionError(
-            f"[MacPocket] Failed to load Whisper model '{model_size}': {exc}"
-        ) from exc
+        # Fallback to 'tiny' model if loading a larger model fails (e.g. OOM on server)
+        if model_size != "tiny":
+            print(f"[MacPocket] Loading '{model_size}' failed ({exc}), falling back to 'tiny' model...")
+            try:
+                model = whisper.load_model("tiny")
+            except Exception as inner_exc:
+                raise TranscriptionError(
+                    f"[MacPocket] Failed to load Whisper model: {inner_exc}"
+                ) from inner_exc
+        else:
+            raise TranscriptionError(
+                f"[MacPocket] Failed to load Whisper model '{model_size}': {exc}"
+            ) from exc
 
     _MODEL_CACHE[model_size] = model
     return model
