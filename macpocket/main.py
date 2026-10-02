@@ -85,35 +85,45 @@ def _ensure_dirs() -> None:
 
 def _convert_to_wav(src_path: Path, dst_path: Path) -> None:
     """Normalize whatever format the browser recorded (webm/opus, mp4/aac,
-    ogg, ...) into a mono 16kHz WAV file using pydub (which shells out to
-    ffmpeg). Whisper can technically decode most formats directly via
-    ffmpeg too, but converting up front lets us fail fast on a corrupt
-    upload with a clear error instead of a confusing Whisper stack trace.
+    ogg, ...) into a mono 16kHz WAV file using pydub or directly via ffmpeg subprocess.
     """
     try:
         from pydub import AudioSegment
-    except ImportError as exc:
+        audio = AudioSegment.from_file(src_path)
+        audio = audio.set_channels(1).set_frame_rate(16000)
+        audio.export(dst_path, format="wav")
+        return
+    except ImportError:
+        # Fall back to direct ffmpeg subprocess if pydub is not installed
+        pass
+    except Exception:
+        # If pydub fails to decode, attempt ffmpeg directly below before giving up
+        pass
+
+    import subprocess
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(src_path),
+        "-ac", "1",
+        "-ar", "16000",
+        str(dst_path)
+    ]
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if res.returncode != 0:
+            err_msg = res.stderr.decode("utf-8", errors="replace")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not decode the uploaded audio with ffmpeg: {err_msg}",
+            )
+    except FileNotFoundError:
         raise HTTPException(
             status_code=500,
             detail=(
-                "The 'pydub' package is not installed on the server. "
-                "Install it with: pip install -r requirements.txt"
+                "Neither pydub nor ffmpeg is available on the server. "
+                "Please install pydub (pip install pydub) or ffmpeg."
             ),
-        ) from exc
-
-    try:
-        audio = AudioSegment.from_file(src_path)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Could not decode the uploaded audio. Make sure ffmpeg is "
-                f"installed on the server. Original error: {exc}"
-            ),
-        ) from exc
-
-    audio = audio.set_channels(1).set_frame_rate(16000)
-    audio.export(dst_path, format="wav")
+        )
 
 
 def _write_note(title: str, transcript: str, summary: str) -> Path:
