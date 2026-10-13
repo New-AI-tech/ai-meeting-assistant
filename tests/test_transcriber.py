@@ -3,7 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 PACKAGE_DIR = Path(__file__).resolve().parents[1] / "macpocket"
@@ -71,6 +71,46 @@ class CloudEntrypointTests(unittest.TestCase):
             import macpocket.cloud  # noqa: F401
 
             self.assertEqual(os.environ["TRANSCRIPTION_BACKEND"], "local")
+
+
+class OpenAIErrorTests(unittest.TestCase):
+    def setUp(self):
+        handle = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        handle.write(b"not-empty")
+        handle.close()
+        self.audio_path = Path(handle.name)
+
+    def tearDown(self):
+        self.audio_path.unlink(missing_ok=True)
+
+    def test_exhausted_credits_raise_actionable_quota_error(self):
+        error = RuntimeError("sensitive provider error")
+        error.status_code = 429
+        error.body = {
+            "error": {
+                "type": "insufficient_quota",
+                "code": "credit_balance_exhausted",
+            }
+        }
+        client = MagicMock()
+        client.audio.transcriptions.create.side_effect = error
+
+        with patch.dict(sys.modules, {"openai": MagicMock(OpenAI=lambda **_: client)}):
+            with self.assertRaisesRegex(
+                transcriber.TranscriptionQuotaError, "no credits remaining"
+            ):
+                transcriber._transcribe_file_openai(self.audio_path, "test-key")
+
+    def test_temporary_429_is_distinct_from_exhausted_credits(self):
+        error = RuntimeError("rate limited")
+        error.status_code = 429
+        error.body = {"error": {"code": "rate_limit_exceeded"}}
+        client = MagicMock()
+        client.audio.transcriptions.create.side_effect = error
+
+        with patch.dict(sys.modules, {"openai": MagicMock(OpenAI=lambda **_: client)}):
+            with self.assertRaises(transcriber.TranscriptionRateLimitError):
+                transcriber._transcribe_file_openai(self.audio_path, "test-key")
 
 
 if __name__ == "__main__":

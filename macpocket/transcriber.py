@@ -31,6 +31,14 @@ class TranscriptionError(Exception):
     """Raised when transcription cannot proceed."""
 
 
+class TranscriptionQuotaError(TranscriptionError):
+    """Raised when the configured transcription account has no API credits."""
+
+
+class TranscriptionRateLimitError(TranscriptionError):
+    """Raised when the transcription provider asks the client to retry later."""
+
+
 def _ensure_ffmpeg_on_path():
     """Ensure ffmpeg binary is discoverable in PATH, using imageio_ffmpeg if needed."""
     import os
@@ -207,6 +215,19 @@ def _transcribe_file_openai(path: Path, api_key: str) -> str:
                 file=audio_file,
             )
     except Exception as exc:
+        error_code = _openai_error_code(exc)
+        if error_code in {"credit_balance_exhausted", "insufficient_quota"}:
+            raise TranscriptionQuotaError(
+                "OpenAI transcription is unavailable because the configured "
+                "API account has no credits remaining. Add API credits in the "
+                "OpenAI billing settings, or run MacPocket locally with "
+                "TRANSCRIPTION_BACKEND=local."
+            ) from exc
+        if getattr(exc, "status_code", None) == 429:
+            raise TranscriptionRateLimitError(
+                "OpenAI transcription is temporarily rate limited. Wait a "
+                "moment and try the upload again."
+            ) from exc
         raise TranscriptionError(
             f"[MacPocket] OpenAI transcription failed: {exc}"
         ) from exc
@@ -214,6 +235,19 @@ def _transcribe_file_openai(path: Path, api_key: str) -> str:
     text = response.text.strip()
     print("[MacPocket] Transcription complete.")
     return text
+
+
+def _openai_error_code(exc: Exception) -> str | None:
+    """Extract a stable API error code without depending on SDK internals."""
+    body = getattr(exc, "body", None)
+    if not isinstance(body, dict):
+        return None
+
+    error = body.get("error", body)
+    if not isinstance(error, dict):
+        return None
+    code = error.get("code") or error.get("type")
+    return code if isinstance(code, str) else None
 
 
 def _ensure_16k_mono(audio: np.ndarray, sample_rate: int) -> np.ndarray:

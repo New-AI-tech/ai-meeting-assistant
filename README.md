@@ -27,6 +27,13 @@ deployment and redeploy. Local installs continue to use `macpocket.main` and
 run Whisper on-device. You can override either choice with
 `TRANSCRIPTION_BACKEND=local`, `auto`, or `openai`.
 
+**"OpenAI transcription ... has no credits remaining"**
+API keys do not include unlimited transcription. Add credits to the OpenAI
+organization associated with the deployed `OPENAI_API_KEY`, then retry. A
+local Mac can avoid API usage by running `macpocket.main` with
+`TRANSCRIPTION_BACKEND=local`; do not select this on a lightweight cloud
+deployment because its cloud dependencies intentionally omit local Whisper.
+
 **"No input devices found" / microphone not detected**
 Check **System Settings → Privacy & Security → Microphone** and make
 sure Terminal (or whichever app you're running Python from) has
