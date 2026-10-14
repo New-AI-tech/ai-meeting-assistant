@@ -1,0 +1,7 @@
+# Never commit local secrets.
+.env
+.env.*
+
+# Python-generated files.
+__pycache__/
+*.py[cod]
