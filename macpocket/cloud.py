@@ -11,7 +11,7 @@ import os
 # Set this before importing ``main`` (and therefore ``config``). Deployments
 # can still override it, but the checked-in cloud entry point is safe without
 # relying on an undocumented provider-specific environment variable.
-os.environ.setdefault("TRANSCRIPTION_BACKEND", "openai")
+os.environ.setdefault("TRANSCRIPTION_BACKEND", "assemblyai")
 
 from .main import app  # noqa: E402  (configuration must precede app import)
 

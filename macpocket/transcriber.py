@@ -170,12 +170,21 @@ def transcribe_file(
             f"{', '.join(TRANSCRIPTION_BACKENDS)}"
         )
 
+    assemblyai_key = os.environ.get("ASSEMBLYAI_API_KEY")
     openai_key = os.environ.get("OPENAI_API_KEY")
     # Hosted workers are a poor fit for loading and running local Whisper:
     # the model download and inference happen inside the request and can cause
     # the platform proxy to return 502 before FastAPI can send a response.
     # In auto mode, use the transcription API whenever it is configured. A
     # keyless local installation continues to use local Whisper as before.
+    if backend == "assemblyai" or (backend == "auto" and assemblyai_key):
+        if not assemblyai_key:
+            raise TranscriptionError(
+                "ASSEMBLYAI_API_KEY is required when "
+                "TRANSCRIPTION_BACKEND=assemblyai."
+            )
+        return _transcribe_file_assemblyai(path, assemblyai_key)
+
     if backend == "openai" or (backend == "auto" and openai_key):
         if not openai_key:
             raise TranscriptionError(
@@ -198,6 +207,29 @@ def transcribe_file(
         raise TranscriptionError(f"[MacPocket] Whisper transcription failed: {exc}") from exc
 
     text = result.get("text", "").strip()
+    print("[MacPocket] Transcription complete.")
+    return text
+
+
+def _transcribe_file_assemblyai(path: Path, api_key: str) -> str:
+    """Upload *path* and wait for transcription with the AssemblyAI SDK."""
+    print("[MacPocket] Transcribing audio with AssemblyAI...")
+    try:
+        import assemblyai as aai
+
+        aai.settings.api_key = api_key
+        transcript = aai.Transcriber().transcribe(str(path))
+    except Exception as exc:
+        raise TranscriptionError(
+            f"[MacPocket] AssemblyAI transcription request failed: {exc}"
+        ) from exc
+
+    if transcript.status == aai.TranscriptStatus.error:
+        raise TranscriptionError(
+            f"[MacPocket] AssemblyAI transcription failed: {transcript.error}"
+        )
+
+    text = (transcript.text or "").strip()
     print("[MacPocket] Transcription complete.")
     return text
 

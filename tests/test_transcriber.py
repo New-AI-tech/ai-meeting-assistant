@@ -58,12 +58,12 @@ class TranscribeFileBackendTests(unittest.TestCase):
 
 
 class CloudEntrypointTests(unittest.TestCase):
-    def test_cloud_entrypoint_defaults_to_openai(self):
+    def test_cloud_entrypoint_defaults_to_assemblyai(self):
         with patch.dict(os.environ, {}, clear=True):
             sys.modules.pop("macpocket.cloud", None)
             import macpocket.cloud  # noqa: F401
 
-            self.assertEqual(os.environ["TRANSCRIPTION_BACKEND"], "openai")
+            self.assertEqual(os.environ["TRANSCRIPTION_BACKEND"], "assemblyai")
 
     def test_cloud_entrypoint_preserves_explicit_override(self):
         with patch.dict(os.environ, {"TRANSCRIPTION_BACKEND": "local"}, clear=True):
@@ -112,6 +112,42 @@ class OpenAIErrorTests(unittest.TestCase):
             with self.assertRaises(transcriber.TranscriptionRateLimitError):
                 transcriber._transcribe_file_openai(self.audio_path, "test-key")
 
+
+class AssemblyAIBackendTests(unittest.TestCase):
+    def setUp(self):
+        handle = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        handle.write(b"not-empty")
+        handle.close()
+        self.audio_path = Path(handle.name)
+
+    def tearDown(self):
+        self.audio_path.unlink(missing_ok=True)
+
+    @patch.object(transcriber, "_transcribe_file_assemblyai", return_value="text")
+    @patch.object(transcriber, "_get_model")
+    def test_auto_prefers_assemblyai_when_key_is_configured(
+        self, get_model, assemblyai_transcribe
+    ):
+        with patch.object(transcriber, "TRANSCRIPTION_BACKEND", "auto"), patch.dict(
+            os.environ, {"ASSEMBLYAI_API_KEY": "test-key"}, clear=True
+        ):
+            result = transcriber.transcribe_file(str(self.audio_path))
+
+        self.assertEqual(result, "text")
+        assemblyai_transcribe.assert_called_once_with(self.audio_path, "test-key")
+        get_model.assert_not_called()
+
+    @patch.object(transcriber, "_get_model")
+    def test_assemblyai_backend_requires_key(self, get_model):
+        with patch.object(
+            transcriber, "TRANSCRIPTION_BACKEND", "assemblyai"
+        ), patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(
+                transcriber.TranscriptionError, "ASSEMBLYAI_API_KEY"
+            ):
+                transcriber.transcribe_file(str(self.audio_path))
+
+        get_model.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()
