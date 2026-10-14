@@ -53,6 +53,14 @@ DEFAULT_WHISPER_MODEL = "tiny"
 # instability/crashes with fp16 on CPU.
 DEFAULT_FP16 = False
 
+# ``auto`` keeps local-first behaviour on Macs, but avoids loading PyTorch and
+# downloading a Whisper model when a supported transcription API is configured.
+# Loading the local model during an HTTP request can exhaust a small worker or
+# outlive a reverse proxy's timeout, which surfaces in the browser as a 502.
+TRANSCRIPTION_BACKENDS = ("auto", "local", "groq", "assemblyai", "openai")
+TRANSCRIPTION_BACKEND = os.environ.get("TRANSCRIPTION_BACKEND", "auto").lower()
+GROQ_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo"
+
 # --- Summarization ---------------------------------------------------------
 
 SUMMARY_BACKENDS = ("local", "openai")
