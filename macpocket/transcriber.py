@@ -20,6 +20,7 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 from config import (
     DEFAULT_FP16,
     DEFAULT_WHISPER_MODEL,
+    GROQ_TRANSCRIPTION_MODEL,
     SAMPLE_RATE,
     TRANSCRIPTION_BACKEND,
     TRANSCRIPTION_BACKENDS,
@@ -170,6 +171,7 @@ def transcribe_file(
             f"{', '.join(TRANSCRIPTION_BACKENDS)}"
         )
 
+    groq_key = os.environ.get("GROQ_API_KEY")
     assemblyai_key = os.environ.get("ASSEMBLYAI_API_KEY")
     openai_key = os.environ.get("OPENAI_API_KEY")
     # Hosted workers are a poor fit for loading and running local Whisper:
@@ -177,6 +179,13 @@ def transcribe_file(
     # the platform proxy to return 502 before FastAPI can send a response.
     # In auto mode, use the transcription API whenever it is configured. A
     # keyless local installation continues to use local Whisper as before.
+    if backend == "groq" or (backend == "auto" and groq_key):
+        if not groq_key:
+            raise TranscriptionError(
+                "GROQ_API_KEY is required when TRANSCRIPTION_BACKEND=groq."
+            )
+        return _transcribe_file_groq(path, groq_key)
+
     if backend == "assemblyai" or (backend == "auto" and assemblyai_key):
         if not assemblyai_key:
             raise TranscriptionError(
@@ -207,6 +216,29 @@ def transcribe_file(
         raise TranscriptionError(f"[MacPocket] Whisper transcription failed: {exc}") from exc
 
     text = result.get("text", "").strip()
+    print("[MacPocket] Transcription complete.")
+    return text
+
+
+def _transcribe_file_groq(path: Path, api_key: str) -> str:
+    """Transcribe *path* with Groq's hosted Whisper API."""
+    print("[MacPocket] Transcribing audio with Groq...")
+    try:
+        from groq import Groq
+
+        client = Groq(api_key=api_key)
+        with path.open("rb") as audio_file:
+            transcript = client.audio.transcriptions.create(
+                file=audio_file,
+                model=GROQ_TRANSCRIPTION_MODEL,
+                response_format="json",
+            )
+    except Exception as exc:
+        raise TranscriptionError(
+            f"[MacPocket] Groq transcription failed: {exc}"
+        ) from exc
+
+    text = (transcript.text or "").strip()
     print("[MacPocket] Transcription complete.")
     return text
 

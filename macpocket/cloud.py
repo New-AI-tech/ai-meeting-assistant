@@ -11,9 +11,9 @@ import os
 # Set this before importing ``main`` (and therefore ``config``). Assignment is
 # intentional rather than ``setdefault``: an old deployment may still have
 # TRANSCRIPTION_BACKEND=openai configured from an earlier release. The cloud
-# entry point is specifically the AssemblyAI deployment; use ``macpocket.main``
+# entry point is specifically the Groq deployment; use ``macpocket.main``
 # when an explicitly selectable backend is required.
-os.environ["TRANSCRIPTION_BACKEND"] = "assemblyai"
+os.environ["TRANSCRIPTION_BACKEND"] = "groq"
 
 from .main import app  # noqa: E402  (configuration must precede app import)
 
