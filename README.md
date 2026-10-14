@@ -203,54 +203,6 @@ containing:
 ```
 Title: <your title>
 Date: 2026-08-20 14:32:10
-============================================================
-
-TRANSCRIPT
-------------------------------------------------------------
-<full transcript text>
-
-SUMMARY & ACTION ITEMS
-------------------------------------------------------------
-## Summary
-- ...
-- ...
-- ...
-
-## Action Items
-- [ ] ... (Owner: ...)
-- [ ] ... (Owner: ...)
-```
-
-The summary and action items are also printed to the terminal when the
-run finishes.
-
-## Choosing a summarization backend
-
-### Local (default) — Ollama + llama3.2
-
-Runs entirely on-device, no API key or internet connection required
-after the model is pulled.
-
-```bash
-brew install ollama   # or download from https://ollama.com/download
-ollama pull llama3.2
-python main.py --backend local
-```
-
-If Ollama isn't running or the model hasn't been pulled, MacPocket will
-catch the error and print these exact steps.
-
-### Cloud — OpenAI GPT-4o-mini
-
-Requires an API key set via the `OPENAI_API_KEY` environment variable
-(or a `.env` file in the project directory, since MacPocket loads
-`python-dotenv` automatically):
-
-```bash
-export OPENAI_API_KEY="sk-..."
-python main.py --backend openai
-```
-
 ## Whisper model sizes & performance
 
 | Model | Relative speed | Notes |
