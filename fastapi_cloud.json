@@ -1,3 +1,3 @@
 {
-  "entrypoint": "macpocket.main:app"
+  "entrypoint": "macpocket.cloud:app"
 }

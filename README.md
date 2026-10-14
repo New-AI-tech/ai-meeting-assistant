@@ -64,6 +64,55 @@ source venv/bin/activate
 python main.py
 ```
 
+### Standalone AssemblyAI transcription
+
+The included `transcribe_assemblyai.py` script uses AssemblyAI's official
+Python SDK to upload a local audio file, submit it for transcription, poll
+until processing finishes, and print the resulting text.
+
+Install the SDK:
+
+```bash
+python -m pip install assemblyai
+```
+
+Set your key in an environment variable rather than pasting it into the
+script. Copy the key from your AssemblyAI dashboard and run:
+
+```bash
+# macOS / Linux
+export ASSEMBLYAI_API_KEY="paste-your-key-here"
+
+# Transcribe audio.mp3, or pass another local file path.
+python transcribe_assemblyai.py audio.mp3
+```
+
+In PowerShell:
+
+```powershell
+$env:ASSEMBLYAI_API_KEY = "paste-your-key-here"
+python transcribe_assemblyai.py audio.mp3
+```
+
+Environment variables set this way last only for the current shell session.
+The script exits with a clear message when the file, SDK, API key, or remote
+transcription is unavailable.
+
+Alternatively, use the cross-platform launcher. Omitting `--api-key` opens a
+secure, non-echoing prompt, which keeps the key out of shell history:
+
+```bash
+python run_with_key.py audio.mp3
+```
+
+For non-interactive automation, pass the key explicitly. Be aware that command
+arguments may be visible in shell history or process listings, so the prompt is
+preferred for interactive use:
+
+```bash
+python run_with_key.py --api-key "your-key" audio.mp3
+```
+
 By default, MacPocket will list your available input devices and ask you
 to pick one, record using the local Whisper `base` model, summarize with
 Ollama's `llama3.2`, and record until you press `CTRL+C`.
@@ -222,6 +271,22 @@ python main.py --model small --fp16
 
 ## Troubleshooting
 
+**Hosted `/upload-audio` requests return 502**
+Cloud workers can time out or run out of memory while downloading and running
+the local Whisper model. The checked-in FastAPI Cloud and Procfile entry points
+use `macpocket.cloud`, which selects AssemblyAI transcription without installing the
+large local audio/ML dependency stack. Configure `ASSEMBLYAI_API_KEY` in the
+deployment and redeploy. Local installs continue to use `macpocket.main` and
+run Whisper on-device. You can override either choice with
+`TRANSCRIPTION_BACKEND=local`, `auto`, `assemblyai`, or `openai`.
+
+**"OpenAI transcription ... has no credits remaining"**
+API keys do not include unlimited transcription. Add credits to the OpenAI
+organization associated with the deployed `OPENAI_API_KEY`, then retry. A
+local Mac can avoid API usage by running `macpocket.main` with
+`TRANSCRIPTION_BACKEND=local`; do not select this on a lightweight cloud
+deployment because its cloud dependencies intentionally omit local Whisper.
+
 **"No input devices found" / microphone not detected**
 Check **System Settings → Privacy & Security → Microphone** and make
 sure Terminal (or whichever app you're running Python from) has
@@ -256,8 +321,10 @@ macpocket/
 ## Privacy
 
 - Audio and transcripts stay on your Mac at all times when using the
-  default `local` backend.
-- The `openai` backend sends only the **transcript text** (not audio) to
-  OpenAI's API for summarization.
+  default local transcription and summarization backends.
+- Selecting OpenAI only as the summarizer sends the **transcript text** (not
+  audio) to OpenAI. The resource-safe `macpocket.cloud` deployment entry point
+  sends uploaded audio to AssemblyAI for transcription. Set
+  `TRANSCRIPTION_BACKEND=local` only on a host provisioned to run local Whisper.
 - Notes are stored locally in `~/MacPocket/Notes/`. Nothing is uploaded
   or synced anywhere by MacPocket itself.
