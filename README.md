@@ -229,8 +229,14 @@ the local Whisper model. The checked-in FastAPI Cloud and Procfile entry points
 use `macpocket.cloud`, which selects AssemblyAI transcription without installing the
 large local audio/ML dependency stack. Configure `ASSEMBLYAI_API_KEY` in the
 deployment and redeploy. Local installs continue to use `macpocket.main` and
-run Whisper on-device. You can override either choice with
-`TRANSCRIPTION_BACKEND=local`, `auto`, `assemblyai`, or `openai`.
+run Whisper on-device. The cloud entry point deliberately replaces stale
+`TRANSCRIPTION_BACKEND=openai` settings from earlier deployments. To select a
+different backend, run `macpocket.main` instead of `macpocket.cloud`.
+
+If a hosted error still mentions **OpenAI transcription**, the running service
+is using an older build or the wrong entry point. Redeploy the latest commit
+and confirm the entry point is `macpocket.cloud:app`; the next missing-secret
+error, if any, should mention `ASSEMBLYAI_API_KEY`, never OpenAI credits.
 
 **"OpenAI transcription ... has no credits remaining"**
 API keys do not include unlimited transcription. Add credits to the OpenAI

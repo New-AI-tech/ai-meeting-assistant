@@ -65,12 +65,12 @@ class CloudEntrypointTests(unittest.TestCase):
 
             self.assertEqual(os.environ["TRANSCRIPTION_BACKEND"], "assemblyai")
 
-    def test_cloud_entrypoint_preserves_explicit_override(self):
-        with patch.dict(os.environ, {"TRANSCRIPTION_BACKEND": "local"}, clear=True):
+    def test_cloud_entrypoint_replaces_stale_openai_override(self):
+        with patch.dict(os.environ, {"TRANSCRIPTION_BACKEND": "openai"}, clear=True):
             sys.modules.pop("macpocket.cloud", None)
             import macpocket.cloud  # noqa: F401
 
-            self.assertEqual(os.environ["TRANSCRIPTION_BACKEND"], "local")
+            self.assertEqual(os.environ["TRANSCRIPTION_BACKEND"], "assemblyai")
 
 
 class OpenAIErrorTests(unittest.TestCase):
