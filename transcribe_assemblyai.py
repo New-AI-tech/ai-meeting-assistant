@@ -1,87 +1,109 @@
 #!/usr/bin/env python3
-"""Transcribe a local audio file with the official AssemblyAI SDK.
+"""Transcribe a local audio file with the official AssemblyAI Python SDK.
 
-The script uses the SDK to upload and submit the local file, then explicitly
-polls AssemblyAI until the job reaches a terminal status. The API key is read
-from ``ASSEMBLYAI_API_KEY`` and is never stored in this source file.
+The command submits a local file without blocking, polls the resulting job at
+a fixed three-second interval, and writes only the completed transcript text
+to standard output. Credentials are read from ``ASSEMBLYAI_API_KEY``.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
+import sys
 import time
-from pathlib import Path
+import traceback
+from types import ModuleType
+from typing import NoReturn, Optional, Sequence
 
 
 POLL_INTERVAL_SECONDS = 3
+DEFAULT_AUDIO_FILE = "audio.mp3"
 
 
-def transcribe_file(audio_path: Path, api_key: str) -> str:
-    """Upload *audio_path*, wait for AssemblyAI, and return its transcript."""
-    try:
-        import assemblyai as aai
-    except ImportError as exc:
-        raise RuntimeError(
-            "The AssemblyAI SDK is not installed. Run: pip install assemblyai"
-        ) from exc
-
-    # Configure the official SDK from the environment-provided key. ``submit``
-    # uploads local files and returns after AssemblyAI has queued the job.
-    aai.settings.api_key = api_key
-    transcriber = aai.Transcriber()
-    transcript = transcriber.submit(str(audio_path))
-
-    # Poll until AssemblyAI reports a terminal status. Keeping this loop
-    # explicit makes progress and failure behavior easy to customize.
-    while transcript.status not in {
-        aai.TranscriptStatus.completed,
-        aai.TranscriptStatus.error,
-    }:
-        print(f"Status: {transcript.status}; waiting...", flush=True)
-        time.sleep(POLL_INTERVAL_SECONDS)
-        transcript = transcriber.get_transcript(transcript.id)
-
-    if transcript.status == aai.TranscriptStatus.error:
-        raise RuntimeError(f"AssemblyAI transcription failed: {transcript.error}")
-    if transcript.status != aai.TranscriptStatus.completed:
-        raise RuntimeError(
-            f"AssemblyAI returned unexpected status: {transcript.status}"
-        )
-
-    return transcript.text or ""
+class DependencyError(RuntimeError):
+    """Raised when the official AssemblyAI SDK cannot be imported."""
 
 
-def main() -> int:
+def _parse_args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
+    """Parse command-line arguments from *argv*."""
     parser = argparse.ArgumentParser(
         description="Transcribe a local audio file with AssemblyAI."
     )
     parser.add_argument(
         "audio_file",
         nargs="?",
-        default="audio.mp3",
-        type=Path,
-        help="local audio file to transcribe (default: audio.mp3)",
+        default=DEFAULT_AUDIO_FILE,
+        help=f"local audio file to transcribe (default: {DEFAULT_AUDIO_FILE})",
     )
-    args = parser.parse_args()
+    return parser.parse_args(argv)
 
-    if not args.audio_file.is_file():
-        parser.error(f"audio file does not exist: {args.audio_file}")
 
-    api_key = os.environ.get("ASSEMBLYAI_API_KEY")
-    if not api_key:
-        parser.error(
-            "ASSEMBLYAI_API_KEY is not set. Export it before running this script."
-        )
-
+def _load_assemblyai() -> ModuleType:
+    """Import and return the official SDK with an actionable failure message."""
     try:
-        text = transcribe_file(args.audio_file, api_key)
-    except RuntimeError as exc:
-        parser.exit(1, f"Error: {exc}\n")
+        return importlib.import_module("assemblyai")
+    except ImportError as exc:
+        raise DependencyError(
+            "The AssemblyAI SDK is not installed. Run: pip install assemblyai"
+        ) from exc
 
-    print(text)
-    return 0
+
+def _exit_with_error(message: str) -> NoReturn:
+    """Write a user-facing error to stderr and terminate unsuccessfully."""
+    print(f"Error: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def main(argv: Optional[Sequence[str]] = None) -> NoReturn:
+    """Run the transcription CLI and terminate with a conventional exit code.
+
+    Expected configuration and provider failures are presented as concise
+    errors. Any unexpected exception includes its traceback to make production
+    diagnostics possible while still returning exit status 1.
+    """
+    try:
+        args = _parse_args(argv)
+        assemblyai = _load_assemblyai()
+
+        if not os.path.exists(args.audio_file):
+            _exit_with_error(f"audio file does not exist: {args.audio_file}")
+
+        api_key = os.environ.get("ASSEMBLYAI_API_KEY")
+        if not api_key:
+            _exit_with_error(
+                "ASSEMBLYAI_API_KEY is not set. Export it before running this script."
+            )
+
+        assemblyai.settings.api_key = api_key
+        transcriber = assemblyai.Transcriber()
+        transcript = transcriber.submit(args.audio_file)
+
+        terminal_statuses = {
+            assemblyai.TranscriptStatus.completed,
+            assemblyai.TranscriptStatus.error,
+        }
+        while transcript.status not in terminal_statuses:
+            time.sleep(POLL_INTERVAL_SECONDS)
+            transcript = transcriber.get_transcript(transcript.id)
+
+        if transcript.status == assemblyai.TranscriptStatus.error:
+            _exit_with_error(
+                f"AssemblyAI transcription failed: {transcript.error}"
+            )
+
+        print(transcript.text or "")
+        raise SystemExit(0)
+    except SystemExit:
+        raise
+    except DependencyError as exc:
+        _exit_with_error(str(exc))
+    except Exception:
+        print("Error: unexpected transcription failure", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

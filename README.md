@@ -98,6 +98,21 @@ Environment variables set this way last only for the current shell session.
 The script exits with a clear message when the file, SDK, API key, or remote
 transcription is unavailable.
 
+Alternatively, use the cross-platform launcher. Omitting `--api-key` opens a
+secure, non-echoing prompt, which keeps the key out of shell history:
+
+```bash
+python run_with_key.py audio.mp3
+```
+
+For non-interactive automation, pass the key explicitly. Be aware that command
+arguments may be visible in shell history or process listings, so the prompt is
+preferred for interactive use:
+
+```bash
+python run_with_key.py --api-key "your-key" audio.mp3
+```
+
 By default, MacPocket will list your available input devices and ask you
 to pick one, record using the local Whisper `base` model, summarize with
 Ollama's `llama3.2`, and record until you press `CTRL+C`.
