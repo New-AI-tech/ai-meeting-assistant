@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 
-API_KEY_ENV_VAR = "ASSEMBLYAI_API_KEY"
+API_KEY_ENV_VAR = "95eb8778d7fa48aba9165a9c3b8a1d14"
 TRANSCRIBER_SCRIPT = Path(__file__).resolve().with_name("transcribe_assemblyai.py")
 
 
