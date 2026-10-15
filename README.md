@@ -22,10 +22,33 @@ python main.py --model small --fp16
 Cloud workers can time out or run out of memory while downloading and running
 the local Whisper model. The checked-in FastAPI Cloud and Procfile entry points
 use `macpocket.cloud`, which selects API transcription without installing the
-large local audio/ML dependency stack. Configure `OPENAI_API_KEY` in the
-deployment and redeploy. Local installs continue to use `macpocket.main` and
+large local audio/ML dependency stack. Configure an API key in the deployment
+(`GROQ_API_KEY` for the free Groq tier, or `OPENAI_API_KEY` for the paid
+OpenAI API) and redeploy. Local installs continue to use `macpocket.main` and
 run Whisper on-device. You can override either choice with
-`TRANSCRIPTION_BACKEND=local`, `auto`, or `openai`.
+`TRANSCRIPTION_BACKEND=local`, `auto`, `openai`, `groq`, or `assembler`.
+
+**"OpenAI transcription is unavailable ... no credits remaining"**
+The OpenAI account behind your `OPENAI_API_KEY` has an exhausted API balance
+(the API returns a 429 `insufficient_quota` error). Free alternatives:
+
+1. **Use a free API tier** — MacPocket supports OpenAI-compatible
+   transcription providers with free tiers:
+   - Groq (recommended): create a free key at https://console.groq.com/keys,
+     then set `TRANSCRIPTION_BACKEND=groq` and `GROQ_API_KEY=gsk_...`
+     (uses `whisper-large-v3-turbo`; override with `GROQ_WHISPER_MODEL`).
+   - AssemblerAPI: free developer account at https://www.assemblerapi.co,
+     then set `TRANSCRIPTION_BACKEND=assembler` and `ASSEMBLER_API_KEY=...`
+     (override the model with `ASSEMBLER_MODEL`).
+2. **Run fully local for free** — on a machine with the local Whisper stack
+   installed (`pip install openai-whisper`, `brew install ffmpeg`), set
+   `TRANSCRIPTION_BACKEND=local`. No API costs at all.
+3. Top up credits at https://platform.openai.com/account/billing.
+
+In `auto` mode MacPocket prefers configured free-tier keys (Groq,
+AssemblerAPI) over the paid OpenAI key, and if any API account runs out of
+credits it automatically falls back to local Whisper when available, or to
+another configured backend, before surfacing this message.
 
 **"No input devices found" / microphone not detected**
 Check **System Settings → Privacy & Security → Microphone** and make
