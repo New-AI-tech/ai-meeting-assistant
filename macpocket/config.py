@@ -54,10 +54,42 @@ DEFAULT_WHISPER_MODEL = "tiny"
 DEFAULT_FP16 = False
 
 # ``auto`` keeps local-first behaviour on Macs, but avoids loading PyTorch and
-# downloading a Whisper model on a cloud worker when an OpenAI key is present.
+# downloading a Whisper model on a cloud worker when an API key is present.
 # Loading the local model during an HTTP request can exhaust a small worker or
 # outlive a reverse proxy's timeout, which surfaces in the browser as a 502.
-TRANSCRIPTION_BACKENDS = ("auto", "local", "openai")
+TRANSCRIPTION_BACKENDS = ("auto", "local", "openai", "groq", "assembler")
+# Backends that talk to an OpenAI-compatible /v1/audio/transcriptions endpoint.
+OPENAI_COMPATIBLE_BACKENDS = ("openai", "groq", "assembler")
+
+# Per-backend defaults: env var holding the API key, base URL (None means use
+# the SDK default), and the transcription model name.
+#   - groq:      Groq offers a genuinely free tier for whisper-large-v3.
+#   - assembler: AssemblerAPI has a free developer account tier with EAS speech
+#                models exposed through an OpenAI-compatible endpoint.
+_TRANSCRIPTION_DEFAULTS = {
+    "openai": {
+        "key_env": "OPENAI_API_KEY",
+        "base_url_env": None,
+        "model": "whisper-1",
+        "model_env": "OPENAI_WHISPER_MODEL",
+    },
+    "groq": {
+        "key_env": "GROQ_API_KEY",
+        "base_url_env": None,
+        "model": "whisper-large-v3-turbo",
+        "model_env": "GROQ_WHISPER_MODEL",
+    },
+    "assembler": {
+        "key_env": "ASSEMBLER_API_KEY",
+        # Explicit default so requests hit the transcriptions endpoint even
+        # though the base URL ends in /v1 (SDK appends /audio/transcriptions).
+        "base_url_env": "ASSEMBLER_API_BASE_URL",
+        "base_url_default": "https://api.assemblerapi.co/v1",
+        "model": "eas-v1",
+        "model_env": "ASSEMBLER_MODEL",
+    },
+}
+
 TRANSCRIPTION_BACKEND = os.environ.get("TRANSCRIPTION_BACKEND", "auto").lower()
 
 # --- Summarization ---------------------------------------------------------

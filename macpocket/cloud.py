@@ -10,8 +10,11 @@ import os
 
 # Set this before importing ``main`` (and therefore ``config``). Deployments
 # can still override it, but the checked-in cloud entry point is safe without
-# relying on an undocumented provider-specific environment variable.
-os.environ.setdefault("TRANSCRIPTION_BACKEND", "openai")
+# relying on an undocumented provider-specific environment variable. In auto
+# mode a configured free-tier key (GROQ_API_KEY / ASSEMBLER_API_KEY) is used
+# in preference to the paid OpenAI API, so hosting costs nothing when a free
+# backend is configured.
+os.environ.setdefault("TRANSCRIPTION_BACKEND", "auto")
 
 from .main import app  # noqa: E402  (configuration must precede app import)
 
