@@ -91,6 +91,7 @@ _TRANSCRIPTION_DEFAULTS = {
 }
 
 TRANSCRIPTION_BACKEND = os.environ.get("TRANSCRIPTION_BACKEND", "auto").lower()
+GROQ_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo"
 
 # --- Summarization ---------------------------------------------------------
 

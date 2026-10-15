@@ -38,7 +38,12 @@ from config import (
     WHISPER_MODELS,
 )
 from summarizer import SummarizationError, summarize
-from transcriber import TranscriptionError, transcribe_file
+from transcriber import (
+    TranscriptionError,
+    TranscriptionQuotaError,
+    TranscriptionRateLimitError,
+    transcribe_file,
+)
 
 load_dotenv()
 
@@ -220,6 +225,10 @@ async def upload_audio(
 
         try:
             transcript = transcribe_file(str(wav_path), model_size=model, fp16=DEFAULT_FP16)
+        except TranscriptionQuotaError as exc:
+            raise HTTPException(status_code=402, detail=str(exc)) from exc
+        except TranscriptionRateLimitError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
         except TranscriptionError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
