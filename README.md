@@ -226,24 +226,34 @@ python main.py --model small --fp16
 **Hosted `/upload-audio` requests return 502**
 Cloud workers can time out or run out of memory while downloading and running
 the local Whisper model. The checked-in FastAPI Cloud and Procfile entry points
-use `macpocket.cloud`, which selects Groq transcription without installing the
-large local audio/ML dependency stack. Configure `GROQ_API_KEY` in the
-deployment and redeploy. Local installs continue to use `macpocket.main` and
-run Whisper on-device. The cloud entry point deliberately replaces stale
-`TRANSCRIPTION_BACKEND=openai` settings from earlier deployments. To select a
-different backend, run `macpocket.main` instead of `macpocket.cloud`.
+use `macpocket.cloud`, which selects API transcription without installing the
+large local audio/ML dependency stack. Configure an API key in the deployment
+(`GROQ_API_KEY` for the free Groq tier, or `OPENAI_API_KEY` for the paid
+OpenAI API) and redeploy. Local installs continue to use `macpocket.main` and
+run Whisper on-device. You can override either choice with
+`TRANSCRIPTION_BACKEND=local`, `auto`, `openai`, `groq`, or `assembler`.
 
-If a hosted error still mentions **OpenAI transcription**, the running service
-is using an older build or the wrong entry point. Redeploy the latest commit
-and confirm the entry point is `macpocket.cloud:app`; the next missing-secret
-error, if any, should mention `GROQ_API_KEY`, never OpenAI credits.
+**"OpenAI transcription is unavailable ... no credits remaining"**
+The OpenAI account behind your `OPENAI_API_KEY` has an exhausted API balance
+(the API returns a 429 `insufficient_quota` error). Free alternatives:
 
-**"OpenAI transcription ... has no credits remaining"**
-API keys do not include unlimited transcription. Add credits to the OpenAI
-organization associated with the deployed `OPENAI_API_KEY`, then retry. A
-local Mac can avoid API usage by running `macpocket.main` with
-`TRANSCRIPTION_BACKEND=local`; do not select this on a lightweight cloud
-deployment because its cloud dependencies intentionally omit local Whisper.
+1. **Use a free API tier** — MacPocket supports OpenAI-compatible
+   transcription providers with free tiers:
+   - Groq (recommended): create a free key at https://console.groq.com/keys,
+     then set `TRANSCRIPTION_BACKEND=groq` and `GROQ_API_KEY=gsk_...`
+     (uses `whisper-large-v3-turbo`; override with `GROQ_WHISPER_MODEL`).
+   - AssemblerAPI: free developer account at https://www.assemblerapi.co,
+     then set `TRANSCRIPTION_BACKEND=assembler` and `ASSEMBLER_API_KEY=...`
+     (override the model with `ASSEMBLER_MODEL`).
+2. **Run fully local for free** — on a machine with the local Whisper stack
+   installed (`pip install openai-whisper`, `brew install ffmpeg`), set
+   `TRANSCRIPTION_BACKEND=local`. No API costs at all.
+3. Top up credits at https://platform.openai.com/account/billing.
+
+In `auto` mode MacPocket prefers configured free-tier keys (Groq,
+AssemblerAPI) over the paid OpenAI key, and if any API account runs out of
+credits it automatically falls back to local Whisper when available, or to
+another configured backend, before surfacing this message.
 
 **"No input devices found" / microphone not detected**
 Check **System Settings → Privacy & Security → Microphone** and make

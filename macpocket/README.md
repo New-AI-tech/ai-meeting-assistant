@@ -336,6 +336,47 @@ Set it before running `python run.py`, or put it in a `.env` file in the
 project directory (loaded automatically via `python-dotenv`). Select
 "Cloud (OpenAI)" in the app's settings panel.
 
+## Choosing a transcription backend
+
+Set with the `TRANSCRIPTION_BACKEND` environment variable (works in a `.env`
+file too). Options: `auto` (default), `local`, `openai`, `groq`, `assembler`.
+
+### Free API tiers — Groq (recommended) or AssemblerAPI
+
+If you don't want to pay for OpenAI credits, use a provider with a free tier
+that speaks the same OpenAI-compatible transcription API:
+
+```bash
+# Groq — free key at https://console.groq.com/keys
+export TRANSCRIPTION_BACKEND=groq
+export GROQ_API_KEY="gsk_..."          # uses whisper-large-v3-turbo;
+                                       # override with GROQ_WHISPER_MODEL
+
+# or AssemblerAPI — free developer account at https://www.assemblerapi.co
+export TRANSCRIPTION_BACKEND=assembler
+export ASSEMBLER_API_KEY="..."         # override model with ASSEMBLER_MODEL
+```
+
+In `auto` mode, MacPocket automatically prefers configured free-tier keys
+(Groq, then AssemblerAPI) over a paid `OPENAI_API_KEY`, and falls back to
+local Whisper (when installed) if any API account runs out of credits.
+
+### Fully local (free, no API at all)
+
+```bash
+export TRANSCRIPTION_BACKEND=local
+```
+
+Requires `openai-whisper` (`pip install -r requirements.txt`) and ffmpeg
+(`brew install ffmpeg`) on the host.
+
+### Paid — OpenAI Whisper API
+
+```bash
+export TRANSCRIPTION_BACKEND=openai   # or leave "auto"
+export OPENAI_API_KEY="sk-..."        # requires API credit balance
+```
+
 ## Whisper model sizes & performance
 
 | Model | Relative speed | Notes |

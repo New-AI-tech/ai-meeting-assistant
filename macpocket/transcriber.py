@@ -20,11 +20,12 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 from config import (
     DEFAULT_FP16,
     DEFAULT_WHISPER_MODEL,
-    GROQ_TRANSCRIPTION_MODEL,
+    OPENAI_COMPATIBLE_BACKENDS,
     SAMPLE_RATE,
     TRANSCRIPTION_BACKEND,
     TRANSCRIPTION_BACKENDS,
     WHISPER_MODELS,
+    _TRANSCRIPTION_DEFAULTS,
 )
 
 
@@ -32,12 +33,32 @@ class TranscriptionError(Exception):
     """Raised when transcription cannot proceed."""
 
 
-class TranscriptionQuotaError(TranscriptionError):
-    """Raised when the configured transcription account has no API credits."""
+class InsufficientCreditsError(TranscriptionError):
+    """Raised when the OpenAI API rejects requests due to no credits left.
+
+    Carries an actionable message: top up the account's API credits, or run
+    MacPocket locally with TRANSCRIPTION_BACKEND=local so transcription uses
+    a local Whisper model instead of the hosted API.
+    """
 
 
-class TranscriptionRateLimitError(TranscriptionError):
-    """Raised when the transcription provider asks the client to retry later."""
+_CREDITS_ERROR_MESSAGE = (
+    "The configured transcription API account has no credits remaining. "
+    "Options: add credits in the provider's billing settings, switch to a "
+    "free API tier with TRANSCRIPTION_BACKEND=groq (GROQ_API_KEY) or "
+    "TRANSCRIPTION_BACKEND=assembler (ASSEMBLER_API_KEY), or run MacPocket "
+    "locally with TRANSCRIPTION_BACKEND=local."
+)
+
+_LOCAL_WHISPER_MISSING_MESSAGE = (
+    "[MacPocket] Local transcription requires the 'openai-whisper' package "
+    "(and ffmpeg). Install them with:\n"
+    "    pip install -r requirements.txt\n"
+    "    brew install ffmpeg\n"
+    "On a hosted worker without those dependencies, use the OpenAI "
+    "transcription API instead by setting OPENAI_API_KEY and removing "
+    "TRANSCRIPTION_BACKEND=local."
+)
 
 
 def _ensure_ffmpeg_on_path():
@@ -147,6 +168,61 @@ def transcribe_audio(
     return text
 
 
+def _local_whisper_available() -> bool:
+    """Return True if the local Whisper stack can actually be used here."""
+    try:
+        import whisper  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _is_insufficient_credits_error(exc: Exception) -> bool:
+    """Detect OpenAI errors caused by the account having no credits left.
+
+    The API signals this with HTTP 429 and error codes such as
+    'insufficient_quota' (billing hard stop) or 'usage_limit_reached', with
+    messages like "You exceeded your current quota, please check your plan
+    and billing details".
+    """
+    status = getattr(exc, "status_code", None)
+    body = str(getattr(exc, "body", "") or "").lower()
+    message = str(exc).lower()
+    haystack = f"{body} {message}"
+
+    credit_markers = (
+        "insufficient_quota",
+        "insufficient_credit",
+        "credit_balance_too_low",
+        "exceeded your current quota",
+        "no credits remaining",
+        "credits remaining",
+        "billing",
+    )
+    if any(marker in haystack for marker in credit_markers):
+        return True
+    # A bare 429 without a recognizable billing phrase is usually a rate
+    # limit, not an exhausted balance, so only treat quota-flavoured 429s
+    # as credit problems.
+    if status == 429 and "quota" in haystack:
+        return True
+    return False
+
+
+def _api_backend_for_auto() -> str | None:
+    """Pick a hosted API backend for 'auto' mode, or None to use local Whisper.
+
+    Free-tier backends (Groq, AssemblerAPI) are preferred when their key is
+    configured; the paid OpenAI API is used only as the last resort so that
+    an exhausted OpenAI balance never blocks transcription unnecessarily.
+    """
+    for backend in ("groq", "assembler", "openai"):
+        key_env = _TRANSCRIPTION_DEFAULTS[backend]["key_env"]
+        if os.environ.get(key_env):
+            return backend
+    return None
+
+
 def transcribe_file(
     file_path: str,
     model_size: str = DEFAULT_WHISPER_MODEL,
@@ -171,36 +247,62 @@ def transcribe_file(
             f"{', '.join(TRANSCRIPTION_BACKENDS)}"
         )
 
-    groq_key = os.environ.get("GROQ_API_KEY")
-    assemblyai_key = os.environ.get("ASSEMBLYAI_API_KEY")
-    openai_key = os.environ.get("OPENAI_API_KEY")
     # Hosted workers are a poor fit for loading and running local Whisper:
     # the model download and inference happen inside the request and can cause
     # the platform proxy to return 502 before FastAPI can send a response.
-    # In auto mode, use the transcription API whenever it is configured. A
-    # keyless local installation continues to use local Whisper as before.
-    if backend == "groq" or (backend == "auto" and groq_key):
-        if not groq_key:
-            raise TranscriptionError(
-                "GROQ_API_KEY is required when TRANSCRIPTION_BACKEND=groq."
-            )
-        return _transcribe_file_groq(path, groq_key)
+    # In auto mode, use an API backend whenever a key is configured (free
+    # tiers first). A keyless local installation continues to use local
+    # Whisper as before.
+    api_backend = backend
+    if backend == "auto":
+        api_backend = _api_backend_for_auto()
 
-    if backend == "assemblyai" or (backend == "auto" and assemblyai_key):
-        if not assemblyai_key:
+    if api_backend in OPENAI_COMPATIBLE_BACKENDS:
+        key_env = _TRANSCRIPTION_DEFAULTS[api_backend]["key_env"]
+        api_key = os.environ.get(key_env)
+        if not api_key:
             raise TranscriptionError(
-                "ASSEMBLYAI_API_KEY is required when "
-                "TRANSCRIPTION_BACKEND=assemblyai."
+                f"{key_env} is required when TRANSCRIPTION_BACKEND={api_backend}."
             )
-        return _transcribe_file_assemblyai(path, assemblyai_key)
+        try:
+            return _transcribe_file_api(path, api_backend, api_key)
+        except InsufficientCreditsError as exc:
+            # The configured account has run out of credits. Try cheaper/
+            # free options before failing outright: local Whisper if it is
+            # installed on this host, then any other API backend whose key
+            # happens to be configured.
+            if _local_whisper_available():
+                print(
+                    "[MacPocket] The configured transcription API account "
+                    "has no credits remaining. Falling back to local "
+                    "Whisper for this request. Add credits in the provider's "
+                    "billing settings, or switch to a free tier with "
+                    "TRANSCRIPTION_BACKEND=groq / assembler."
+                )
+                return _transcribe_file_local(path, model_size, fp16)
+            for alt in ("groq", "assembler", "openai"):
+                if alt == api_backend:
+                    continue
+                alt_key_env = _TRANSCRIPTION_DEFAULTS[alt]["key_env"]
+                alt_key = os.environ.get(alt_key_env)
+                if alt_key:
+                    print(
+                        f"[MacPocket] {api_backend} is out of credits; "
+                        f"trying TRANSCRIPTION_BACKEND alternative '{alt}'..."
+                    )
+                    try:
+                        return _transcribe_file_api(path, alt, alt_key)
+                    except InsufficientCreditsError:
+                        continue
+            raise TranscriptionError(str(exc)) from exc
 
-    if backend == "openai" or (backend == "auto" and openai_key):
-        if not openai_key:
-            raise TranscriptionError(
-                "OPENAI_API_KEY is required when TRANSCRIPTION_BACKEND=openai."
-            )
-        return _transcribe_file_openai(path, openai_key)
+    if backend == "local" and not _local_whisper_available():
+        # Explicit local mode was requested but this machine cannot run
+        # Whisper (e.g. a slim cloud worker without the heavy dependencies).
+        # Give the user a clear, actionable error rather than an ImportError.
+        raise TranscriptionError(_LOCAL_WHISPER_MISSING_MESSAGE)
 
+    openai_key = os.environ.get("OPENAI_API_KEY")
     model = _get_model(model_size)
 
     print("[MacPocket] Transcribing audio locally with Whisper "
@@ -212,7 +314,7 @@ def transcribe_file(
         # Explicit local mode retains the API fallback for compatibility.
         if openai_key:
             print(f"[MacPocket] Local Whisper failed ({exc}). Falling back to OpenAI Whisper API...")
-            return _transcribe_file_openai(path, openai_key)
+            return _transcribe_file_api(path, "openai", openai_key)
         raise TranscriptionError(f"[MacPocket] Whisper transcription failed: {exc}") from exc
 
     text = result.get("text", "").strip()
@@ -220,80 +322,68 @@ def transcribe_file(
     return text
 
 
-def _transcribe_file_groq(path: Path, api_key: str) -> str:
-    """Transcribe *path* with Groq's hosted Whisper API."""
-    print("[MacPocket] Transcribing audio with Groq...")
+def _transcribe_file_local(
+    path: Path,
+    model_size: str = DEFAULT_WHISPER_MODEL,
+    fp16: bool = DEFAULT_FP16,
+) -> str:
+    """Run a local Whisper model over *path* (no API involved)."""
+    model = _get_model(model_size)
+
+    print("[MacPocket] Transcribing audio locally with Whisper "
+          f"({'fp16' if fp16 else 'fp32'})... this may take a few minutes.")
+
     try:
-        from groq import Groq
-
-        client = Groq(api_key=api_key)
-        with path.open("rb") as audio_file:
-            transcript = client.audio.transcriptions.create(
-                file=audio_file,
-                model=GROQ_TRANSCRIPTION_MODEL,
-                response_format="json",
-            )
+        result = model.transcribe(str(path), fp16=fp16, verbose=False)
     except Exception as exc:
-        raise TranscriptionError(
-            f"[MacPocket] Groq transcription failed: {exc}"
-        ) from exc
+        raise TranscriptionError(f"[MacPocket] Whisper transcription failed: {exc}") from exc
 
-    text = (transcript.text or "").strip()
+    text = result.get("text", "").strip()
     print("[MacPocket] Transcription complete.")
     return text
 
 
-def _transcribe_file_assemblyai(path: Path, api_key: str) -> str:
-    """Upload *path* and wait for transcription with the AssemblyAI SDK."""
-    print("[MacPocket] Transcribing audio with AssemblyAI...")
-    try:
-        import assemblyai as aai
+def _transcribe_file_api(path: Path, backend: str, api_key: str) -> str:
+    """Transcribe *path* via an OpenAI-compatible transcription API.
 
-        aai.settings.api_key = api_key
-        transcript = aai.Transcriber().transcribe(str(path))
-    except Exception as exc:
-        raise TranscriptionError(
-            f"[MacPocket] AssemblyAI transcription request failed: {exc}"
-        ) from exc
+    Supports the paid OpenAI endpoint as well as free-tier providers that
+    expose the same /v1/audio/transcriptions interface (Groq, AssemblerAPI),
+    without initializing the heavyweight local model.
+    """
+    defaults = _TRANSCRIPTION_DEFAULTS[backend]
+    key_env = defaults["key_env"]
+    model = os.environ.get(defaults["model_env"], defaults["model"])
+    base_url = None
+    if defaults.get("base_url_env"):
+        base_url = os.environ.get(defaults["base_url_env"],
+                                  defaults.get("base_url_default"))
 
-    if transcript.status == aai.TranscriptStatus.error:
-        raise TranscriptionError(
-            f"[MacPocket] AssemblyAI transcription failed: {transcript.error}"
-        )
-
-    text = (transcript.text or "").strip()
-    print("[MacPocket] Transcription complete.")
-    return text
-
-
-def _transcribe_file_openai(path: Path, api_key: str) -> str:
-    """Transcribe *path* without initializing the heavyweight local model."""
-    print("[MacPocket] Transcribing audio with the OpenAI transcription API...")
+    label = {"openai": "OpenAI", "groq": "Groq", "assembler": "AssemblerAPI"}[backend]
+    print(f"[MacPocket] Transcribing audio with the {label} transcription API "
+          f"(model '{model}')...")
     try:
         from openai import OpenAI
 
-        client = OpenAI(api_key=api_key)
+        kwargs = {"api_key": api_key}
+        if base_url:
+            kwargs["base_url"] = base_url
+        client = OpenAI(**kwargs)
         with path.open("rb") as audio_file:
             response = client.audio.transcriptions.create(
-                model="whisper-1",
+                model=model,
                 file=audio_file,
             )
     except Exception as exc:
-        error_code = _openai_error_code(exc)
-        if error_code in {"credit_balance_exhausted", "insufficient_quota"}:
-            raise TranscriptionQuotaError(
-                "OpenAI transcription is unavailable because the configured "
-                "API account has no credits remaining. Add API credits in the "
-                "OpenAI billing settings, or run MacPocket locally with "
-                "TRANSCRIPTION_BACKEND=local."
-            ) from exc
-        if getattr(exc, "status_code", None) == 429:
-            raise TranscriptionRateLimitError(
-                "OpenAI transcription is temporarily rate limited. Wait a "
-                "moment and try the upload again."
+        if _is_insufficient_credits_error(exc):
+            raise InsufficientCreditsError(_CREDITS_ERROR_MESSAGE) from exc
+        if _is_missing_model_error(exc):
+            raise TranscriptionError(
+                f"[MacPocket] {label} transcription failed: model '{model}' "
+                f"was rejected. Set {defaults['model_env']} to a model your "
+                f"account has access to. Original error: {exc}"
             ) from exc
         raise TranscriptionError(
-            f"[MacPocket] OpenAI transcription failed: {exc}"
+            f"[MacPocket] {label} transcription failed: {exc}"
         ) from exc
 
     text = response.text.strip()
@@ -301,17 +391,15 @@ def _transcribe_file_openai(path: Path, api_key: str) -> str:
     return text
 
 
-def _openai_error_code(exc: Exception) -> str | None:
-    """Extract a stable API error code without depending on SDK internals."""
-    body = getattr(exc, "body", None)
-    if not isinstance(body, dict):
-        return None
-
-    error = body.get("error", body)
-    if not isinstance(error, dict):
-        return None
-    code = error.get("code") or error.get("type")
-    return code if isinstance(code, str) else None
+def _is_missing_model_error(exc: Exception) -> bool:
+    """True when the provider rejects the requested model name/deployment."""
+    message = str(exc).lower()
+    return any(marker in message for marker in (
+        "model_not_found",
+        "does not exist",
+        "unknown model",
+        "not a valid model",
+    ))
 
 
 def _ensure_16k_mono(audio: np.ndarray, sample_rate: int) -> np.ndarray:
